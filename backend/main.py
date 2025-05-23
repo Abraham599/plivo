@@ -20,6 +20,13 @@ import sys
 app = FastAPI(title="Status Page API")
 
 # CORS middleware
+
+allowed_origins = [
+    "http://localhost:5173",  # Example: Common Vite dev server
+    "https://your-custom-frontend-domain.com",    # Example: Your custom domain for the frontend
+    # Add any other origins your frontend might be served from
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, replace with specific origins

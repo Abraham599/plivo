@@ -34,7 +34,7 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
   fetchServices: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`${API_URL}/api/services`, {
+      const response = await fetch(`${API_URL}/services`, {
         headers: {
           "Content-Type": "application/json",
         },
