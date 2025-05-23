@@ -1,0 +1,56 @@
+# General
+.DS_Store
+*.log
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.local
+
+# Node / Vite (Frontend)
+node_modules/
+dist/
+dist-ssr/
+coverage/
+.eslintcache
+.vite/
+
+# Python / FastAPI (Backend)
+# Assuming your backend is in a subdirectory like 'backend/'
+# If venv is in the root, just use venv/
+backend/venv/
+backend/.venv/
+backend/env/
+backend/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/
+backend/instance/ # Common for Flask/FastAPI instance-specific configs
+# If your venv is directly in the project root:
+# venv/
+# .venv/
+# env/
+
+# IDE / Editor specific
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
