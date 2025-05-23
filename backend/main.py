@@ -493,7 +493,7 @@ class NotificationPreferenceUpdate(BaseModel):
     incidentUpdates: Optional[bool] = None
     incidentResolved: Optional[bool] = None
 
-@app.post("/api/users/ensure-synced", response_model=SyncedUserResponse)
+@app.post("/users/ensure-synced", response_model=SyncedUserResponse)
 async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUserType, Depends(get_clerk_user_payload)]):
     clerk_id = clerk_user_payload.id
     

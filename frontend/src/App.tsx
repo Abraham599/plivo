@@ -3,9 +3,9 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { SignedIn, SignedOut } from '@clerk/clerk-react';
 import Dashboard from './pages/Dashboard';
 import PublicStatusPage from './pages/PublicStatusPage';
-import CustomSignIn from './components/auth/CustomSignIn';
 import CustomSignUp from './components/auth/CustomSignUp';
 import './App.css';
+import CustomSignIn from './components/auth/CustomSignin';
 
 // ProtectedRoute component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => (

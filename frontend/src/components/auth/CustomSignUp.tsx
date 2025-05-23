@@ -86,7 +86,7 @@ const CustomSignUp = () => {
             const token = await getToken(); // Get token from the new session
             if (token) {
               try {
-                const syncResponse = await fetch(`${API_URL}/api/users/ensure-synced`, {
+                const syncResponse = await fetch(`${API_URL}/users/ensure-synced`, {
                   method: 'POST',
                   headers: {
                     'Authorization': `Bearer ${token}`,
