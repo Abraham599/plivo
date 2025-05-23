@@ -1,0 +1,117 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-py"
+}
+
+model Organization {
+  id          String     @id @default(uuid())
+  name        String
+  clerk_org_id String    @unique
+  services    Service[]
+  incidents   Incident[]
+  users       User[]
+  apiKeys     ApiKey[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Service {
+  id             String     @id @default(uuid())
+  name           String
+  description    String?
+  status         String     @default("operational") // operational, degraded_performance, partial_outage, major_outage
+  organization   Organization @relation(fields: [organization_id], references: [id])
+  organization_id String
+  incidents      Incident[]
+  uptimeChecks   UptimeCheck[]
+  uptimeMetrics  UptimeMetric[]
+  endpoint       String?    // URL to check for uptime monitoring
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model Incident {
+  id             String     @id @default(uuid())
+  title          String
+  description    String
+  status         String     // investigating, identified, monitoring, resolved
+  services       Service[]
+  updates        Update[]
+  organization   Organization @relation(fields: [organization_id], references: [id])
+  organization_id String
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model Update {
+  id          String     @id @default(uuid())
+  message     String
+  incident    Incident   @relation(fields: [incident_id], references: [id])
+  incident_id String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model User {
+  id                String                @id @default(uuid())
+  clerk_user_id     String                @unique
+  email             String                @unique
+  name              String?
+  organization      Organization          @relation(fields: [organization_id], references: [id])
+  organization_id   String
+  notificationPreferences NotificationPreference?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+}
+
+model NotificationPreference {
+  id                String    @id @default(uuid())
+  user              User      @relation(fields: [user_id], references: [id])
+  user_id           String    @unique
+  serviceStatusChanges Boolean @default(true)
+  newIncidents      Boolean   @default(true)
+  incidentUpdates   Boolean   @default(true)
+  incidentResolved  Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// Models for uptime tracking
+model UptimeCheck {
+  id          String    @id @default(uuid())
+  service     Service   @relation(fields: [service_id], references: [id])
+  service_id  String
+  status      String    // up, down
+  responseTime Int?     // in milliseconds
+  timestamp   DateTime  @default(now())
+}
+
+model UptimeMetric {
+  id          String    @id @default(uuid())
+  service     Service   @relation(fields: [service_id], references: [id])
+  service_id  String
+  period      String    // daily, weekly, monthly
+  startDate   DateTime
+  endDate     DateTime
+  uptime      Float     // percentage (0-100)
+  avgResponseTime Int?  // average response time in milliseconds
+  checksCount Int       // number of checks in this period
+  downtimeMinutes Int   // minutes of downtime in this period
+}
+
+// New model for API keys
+model ApiKey {
+  id              String    @id @default(uuid())
+  name            String    // A friendly name for the API key
+  key             String    @unique // The actual API key
+  organization    Organization @relation(fields: [organization_id], references: [id])
+  organization_id String
+  isActive        Boolean   @default(true)
+  lastUsed        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
