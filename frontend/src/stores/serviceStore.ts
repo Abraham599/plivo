@@ -26,7 +26,7 @@ interface ServiceStore {
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export const useServiceStore = create<ServiceStore>((set, get) => ({
+export const useServiceStore = create<ServiceStore>((set) => ({
   services: [],
   isLoading: false,
   error: null,

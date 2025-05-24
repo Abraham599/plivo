@@ -13,7 +13,7 @@ from uptime_service import UptimeService
 from api_auth import ApiKeyAuth
 from clerk_backend_api import Clerk
 from clerk_backend_api.jwks_helpers import AuthenticateRequestOptions
-from clerk_backend_api.models.user import User as ClerkUserType
+from clerk_backend_api.models.user import User as ClerkUser
 import subprocess
 import sys
 
@@ -101,49 +101,88 @@ async def shutdown():
     await db.disconnect()
 
 # Clerk authentication dependency
-async def get_clerk_user(request: Request, authorization: Annotated[Optional[str], Header()] = None):
+async def get_clerk_user_payload(request: Request, authorization: Annotated[Optional[str], Header()] = None) -> ClerkUser:
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header missing")
     
     try:
-        # The SDK will extract the token from the request headers
-        # Remove the 'token=token' argument from AuthenticateRequestOptions
+        request_state = clerk.authenticate_request(
+            request, 
+            AuthenticateRequestOptions() 
+        )
+
+        if not request_state.is_signed_in:
+            detail = "User not authenticated"
+            if request_state.reason: # Provide more specific reason if available
+                detail += f": {request_state.reason}"
+            if request_state.message:
+                detail += f" - {request_state.message}"
+            print(f"AuthN failed in get_clerk_user_payload: is_signed_in=False. Details: {detail}")
+            raise HTTPException(status_code=401, detail=detail)
+
+        if not request_state.user_id:
+            print("AuthN failed in get_clerk_user_payload: user_id missing from token.")
+            raise HTTPException(status_code=401, detail="User ID not found in token claims.")
+
+        # Fetch the full user object from Clerk API using the user_id from the token
+        try:
+            # clerk.users is an instance of UsersApi, get_user is a method on it
+            fetched_user: ClerkUser = clerk.users.get_user(user_id=request_state.user_id)
+            return fetched_user
+        except Exception as e:
+            # Catch specific exceptions from Clerk SDK if possible, e.g., clerk_backend_api.errors.ApiException
+            print(f"Failed to fetch user (ID: {request_state.user_id}) details from Clerk: {type(e).__name__} - {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve user details from authentication provider.")
+
+    except HTTPException as e: # Re-raise HTTPExceptions
+        raise e
+    except Exception as e:
+        print(f"Unexpected authentication error in get_clerk_user_payload: {type(e).__name__} - {e}")
+        # Log the stack trace for unexpected errors
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=401, detail=f"Authentication failed due to an unexpected error: {str(e)}")
+
+# Modify get_clerk_user similarly if it's used and expected to return a full ClerkUser object
+async def get_clerk_user(request: Request, authorization: Annotated[Optional[str], Header()] = None) -> ClerkUser:
+    # This function now mirrors get_clerk_user_payload for consistency
+    # If it's intended for a different purpose (e.g., just checking auth status), adjust accordingly.
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing for get_clerk_user")
+    
+    try:
         request_state = clerk.authenticate_request(
             request,
-            AuthenticateRequestOptions(
-                # You can specify authorized parties if needed
-                # authorized_parties=["your-domain.com"], # Example
-            )
+            AuthenticateRequestOptions()
         )
         
         if not request_state.is_signed_in:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        
-        # Return the user data
-        return request_state.user
-    except Exception as e:
-        # It's good to log the actual exception for debugging
-        print(f"Authentication error in get_clerk_user: {e}")
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+            detail = "User not authenticated"
+            if request_state.reason:
+                detail += f": {request_state.reason}"
+            if request_state.message:
+                detail += f" - {request_state.message}"
+            print(f"AuthN failed in get_clerk_user: is_signed_in=False. Details: {detail}")
+            raise HTTPException(status_code=401, detail=detail)
 
-async def get_clerk_user_payload(request: Request, authorization: Annotated[Optional[str], Header()] = None) -> ClerkUserType:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header missing")
-    try:
-        # The SDK will extract the token from the request headers
-        # Remove the 'token=token' argument from AuthenticateRequestOptions
-        request_state = clerk.authenticate_request(
-            request, 
-            AuthenticateRequestOptions() # Pass empty options if none are needed
-        )
-        if not request_state.is_signed_in or not request_state.user:
-            raise HTTPException(status_code=401, detail="Not authenticated or user data missing")
-        return request_state.user
-    except Exception as e:
-        # It's good to log the actual exception for debugging
-        print(f"Authentication error in get_clerk_user_payload: {e}")
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+        if not request_state.user_id:
+            print("AuthN failed in get_clerk_user: user_id missing from token.")
+            raise HTTPException(status_code=401, detail="User ID not found in token claims for get_clerk_user.")
 
+        try:
+            fetched_user: ClerkUser = clerk.users.get_user(user_id=request_state.user_id)
+            return fetched_user
+        except Exception as e:
+            print(f"Failed to fetch user (ID: {request_state.user_id}) details from Clerk in get_clerk_user: {type(e).__name__} - {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve user details.")
+            
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Unexpected authentication error in get_clerk_user: {type(e).__name__} - {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=401, detail=f"Authentication failed in get_clerk_user due to an unexpected error: {str(e)}")
 # Models
 class ServiceCreate(BaseModel):
     name: str
@@ -497,7 +536,7 @@ class NotificationPreferenceUpdate(BaseModel):
     incidentResolved: Optional[bool] = None
 
 @app.post("/users/ensure-synced", response_model=SyncedUserResponse)
-async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUserType, Depends(get_clerk_user_payload)]):
+async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]):
     clerk_id = clerk_user_payload.id
     
     primary_email_obj = None
@@ -642,7 +681,7 @@ async def create_user(user: UserCreate, clerk_auth_user: Annotated[Any, Depends(
     return created_user
 
 @app.get("/users/me")
-async def get_current_user_details(clerk_user_payload: Annotated[ClerkUserType, Depends(get_clerk_user_payload)]):
+async def get_current_user_details(clerk_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]):
     user = await db.user.find_unique( # Changed from find_first
         where={"clerk_user_id": clerk_user_payload.id},
         include={"notificationPreferences": True, "organization": True} # Include organization
