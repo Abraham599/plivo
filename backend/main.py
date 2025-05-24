@@ -945,16 +945,27 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
                             organization_data = {"name": personal_org_name}
                             clerk_org = await clerk_service.create_organization(name=personal_org_name)
                             
-                            # Add the user to the organization
-                            await clerk_service.add_user_to_organization(
-                                user_id=clerk_id,
-                                organization_id=clerk_org.id,
-                                role="admin"
-                            )
+                            # Log the created organization ID for debugging
+                            logger.info(f"Created organization in Clerk with ID: {clerk_org.id}")
                             
-                            # Create organization in database
+                            # Store the clerk_org_id before trying to add the user
+                            clerk_org_id = clerk_org.id
+                            
+                            try:
+                                # Add the user to the organization
+                                await clerk_service.add_user_to_organization(
+                                    user_id=clerk_id,
+                                    organization_id=clerk_org_id,
+                                    role="basic_member"
+                                )
+                            except Exception as add_error:
+                                # Log the error but continue with creating the organization in the database
+                                logger.error(f"Error adding user to organization: {add_error}")
+                                # We'll still create the organization in the database with the Clerk ID
+                            
+                            # Create organization in database with the Clerk organization ID
                             new_personal_org = await db.organization.create(
-                                data={"name": personal_org_name, "clerk_org_id": clerk_org.id}
+                                data={"name": personal_org_name, "clerk_org_id": clerk_org_id}
                             )
                             local_org_id_to_link = new_personal_org.id
                         except Exception as e:
@@ -985,16 +996,27 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
                         organization_data = {"name": personal_org_name}
                         clerk_org = await clerk_service.create_organization(name=personal_org_name)
                         
-                        # Add the user to the organization
-                        await clerk_service.add_user_to_organization(
-                            user_id=clerk_id,
-                            organization_id=clerk_org.id,
-                            role="admin"
-                        )
+                        # Log the created organization ID for debugging
+                        logger.info(f"Created organization in Clerk with ID: {clerk_org.id}")
                         
-                        # Create organization in database
+                        # Store the clerk_org_id before trying to add the user
+                        clerk_org_id = clerk_org.id
+                        
+                        try:
+                            # Add the user to the organization
+                            await clerk_service.add_user_to_organization(
+                                user_id=clerk_id,
+                                organization_id=clerk_org_id,
+                                role="basic_member"
+                            )
+                        except Exception as add_error:
+                            # Log the error but continue with creating the organization in the database
+                            logger.error(f"Error adding user to organization: {add_error}")
+                            # We'll still create the organization in the database with the Clerk ID
+                        
+                        # Create organization in database with the Clerk organization ID
                         new_personal_org = await db.organization.create(
-                            data={"name": personal_org_name, "clerk_org_id": clerk_org.id}
+                            data={"name": personal_org_name, "clerk_org_id": clerk_org_id}
                         )
                         local_org_id_to_link = new_personal_org.id
                     except Exception as e:

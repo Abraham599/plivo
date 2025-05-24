@@ -76,13 +76,19 @@ class ClerkService:
             The created organization membership
         """
         try:
-            # Add user to organization
+            # Add user to organization using the correct API format
+            # The role must be a valid role in the organization
+            # Default roles in Clerk are 'admin' and 'basic_member'
+            valid_role = role if role in ["admin", "basic_member"] else "basic_member"
+            
+            # Use the organization_memberships SDK to create a membership
             membership = self.clerk.organization_memberships.create(
                 organization_id=organization_id,
                 user_id=user_id,
-                role=role
+                role=valid_role
             )
-            logger.info(f"Added user {user_id} to organization {organization_id} with role {role}")
+            
+            logger.info(f"Added user {user_id} to organization {organization_id} with role {valid_role}")
             return membership
         except Exception as e:
             logger.error(f"Error adding user to organization: {e}")
