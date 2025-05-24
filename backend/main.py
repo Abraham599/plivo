@@ -573,7 +573,6 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
     elif clerk_user_payload.username: 
         name = clerk_user_payload.username
 
-
     db_user = await db.user.find_unique(where={"clerk_user_id": clerk_id})
 
     if db_user:
@@ -590,28 +589,46 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
         # Use from_orm to construct Pydantic model from Prisma model instance
         return SyncedUserResponse.model_validate(db_user)
 
-
     # User not found, create them
     local_org_id_to_link = None
     
-    if clerk_user_payload.organization_memberships and len(clerk_user_payload.organization_memberships) > 0:
-        # For simplicity, using the first active organization.
-        # Production apps might need more complex logic for multiple orgs.
-        active_org_membership = clerk_user_payload.organization_memberships[0]
-        clerk_org_details = active_org_membership.organization
-        clerk_org_id_from_member = clerk_org_details.id
-        # Use Clerk org name, or generate one if blank
-        org_name_from_clerk = clerk_org_details.name or f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
+    # Fetch organization memberships separately using the Clerk API
+    try:
+        # Get all organization memberships for this user
+        org_memberships = clerk.users.get_organization_memberships(user_id=clerk_id)
+        
+        if org_memberships and len(org_memberships) > 0:
+            # For simplicity, using the first active organization.
+            # Production apps might need more complex logic for multiple orgs.
+            active_org_membership = org_memberships[0]
+            clerk_org_details = active_org_membership.organization
+            clerk_org_id_from_member = clerk_org_details.id
+            # Use Clerk org name, or generate one if blank
+            org_name_from_clerk = clerk_org_details.name or f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
 
-
-        local_org = await db.organization.find_unique(where={"clerk_org_id": clerk_org_id_from_member})
-        if not local_org:
-            local_org = await db.organization.create(
-                data={"name": org_name_from_clerk, "clerk_org_id": clerk_org_id_from_member}
-            )
-        local_org_id_to_link = local_org.id
-    else:
-        # No Clerk organization, create a personal one based on user ID
+            local_org = await db.organization.find_unique(where={"clerk_org_id": clerk_org_id_from_member})
+            if not local_org:
+                local_org = await db.organization.create(
+                    data={"name": org_name_from_clerk, "clerk_org_id": clerk_org_id_from_member}
+                )
+            local_org_id_to_link = local_org.id
+        else:
+            # No Clerk organization, create a personal one based on user ID
+            personal_clerk_org_id = f"personal_user_{clerk_id}" 
+            personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
+            
+            existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
+            if existing_personal_org:
+                local_org_id_to_link = existing_personal_org.id
+            else:
+                new_personal_org = await db.organization.create(
+                    data={"name": personal_org_name, "clerk_org_id": personal_clerk_org_id}
+                )
+                local_org_id_to_link = new_personal_org.id
+                
+    except Exception as e:
+        print(f"Error fetching organization memberships for user {clerk_id}: {e}")
+        # Fallback to creating a personal organization
         personal_clerk_org_id = f"personal_user_{clerk_id}" 
         personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
         
@@ -650,7 +667,6 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
     # Fetch the user again to ensure all fields (like createdAt, updatedAt) are current for the response
     final_user_for_response = await db.user.find_unique(where={"id": created_user.id})
     return SyncedUserResponse.model_validate(final_user_for_response)
-
 
 @app.post("/users")
 async def create_user(user: UserCreate, clerk_auth_user: Annotated[Any, Depends(get_clerk_user_payload)]):
