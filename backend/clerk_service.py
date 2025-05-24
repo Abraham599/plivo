@@ -26,24 +26,43 @@ class ClerkService:
             The created organization object
         """
         try:
-            # Create organization in Clerk
-            organization = self.clerk.organizations.create(
-                name=name,
-                slug=slug or None  # Convert empty string to None
-            )
+            # Create organization in Clerk with the correct parameters
+            # The API expects a dictionary with the organization data
+            organization_data = {}
+            if name:
+                organization_data["name"] = name
+            if slug:
+                organization_data["slug"] = slug
+                
+            # Create the organization using the correct method
+            organization = self.clerk.organizations.create_organization(organization_data)
             logger.info(f"Created organization in Clerk: {organization.id} - {name}")
             return organization
         except Exception as e:
             logger.error(f"Error creating organization in Clerk: {e}")
-            # Instead of raising, return None to allow fallback handling
-            return None
+            raise
+            
+    async def delete_organization(self, organization_id: str) -> None:
+        """
+        Delete an organization from Clerk
+        
+        Args:
+            organization_id: The Clerk organization ID
+        """
+        try:
+            # Delete the organization
+            self.clerk.organizations.delete_organization(organization_id)
+            logger.info(f"Deleted organization from Clerk: {organization_id}")
+        except Exception as e:
+            logger.error(f"Error deleting organization from Clerk: {e}")
+            raise
     
     async def add_user_to_organization(
         self, 
         user_id: str, 
         organization_id: str, 
         role: str = "admin"
-    ) -> Optional[OrganizationMembership]:
+    ) -> OrganizationMembership:
         """
         Add a user to an organization in Clerk
         
@@ -53,11 +72,11 @@ class ClerkService:
             role: The role of the user in the organization
             
         Returns:
-            The created organization membership or None if there was an error
+            The created organization membership
         """
         try:
             # Add user to organization
-            membership = self.clerk.organizations.create_membership(
+            membership = self.clerk.organization_memberships.create(
                 organization_id=organization_id,
                 user_id=user_id,
                 role=role
@@ -66,8 +85,7 @@ class ClerkService:
             return membership
         except Exception as e:
             logger.error(f"Error adding user to organization: {e}")
-            # Return None instead of raising to allow fallback handling
-            return None
+            raise
     
     async def get_user_organizations(self, user_id: str) -> List[OrganizationMembership]:
         """
@@ -82,10 +100,25 @@ class ClerkService:
         try:
             # Get user's organization memberships
             memberships = self.clerk.users.get_organization_memberships(user_id=user_id)
+            
+            # Convert to a list if it's not already
+            if not isinstance(memberships, list):
+                # Handle the case where memberships might be a custom object
+                # that doesn't support len() directly
+                memberships_list = []
+                # Try to iterate through the memberships object
+                try:
+                    for membership in memberships:
+                        memberships_list.append(membership)
+                    return memberships_list
+                except Exception as iter_error:
+                    logger.error(f"Error iterating through memberships: {iter_error}")
+                    # If we can't iterate, return an empty list
+                    return []
             return memberships
         except Exception as e:
             logger.error(f"Error getting user organizations: {e}")
-            raise
+            return []  # Return empty list instead of raising to avoid breaking the flow
     
     async def get_organization(self, organization_id: str) -> ClerkOrganization:
         """

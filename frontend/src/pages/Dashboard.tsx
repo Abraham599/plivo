@@ -94,7 +94,20 @@ export default function Dashboard() {
   }
 
   if (servicesError || incidentsError) {
-    return <div className="text-red-500 p-4">Error loading data: {servicesError || incidentsError}</div>;
+    const errorMessage = servicesError || incidentsError || "";
+    
+    // If the error is about no organization selected, show a more helpful message
+    if (errorMessage && errorMessage.includes("No organization selected")) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen p-4">
+          <h2 className="text-xl font-semibold mb-4">Organization Setup Required</h2>
+          <p className="text-center mb-6">We're setting up your personal workspace. Please refresh the page in a few seconds.</p>
+          <Button onClick={() => window.location.reload()}>Refresh Page</Button>
+        </div>
+      );
+    }
+    
+    return <div className="text-red-500 p-4">Error loading data: {errorMessage}</div>;
   }
 
 
