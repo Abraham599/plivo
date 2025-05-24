@@ -586,8 +586,8 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
         if updated_data:
             db_user = await db.user.update(where={"clerk_user_id": clerk_id}, data=updated_data)
         
-        # Use from_orm to construct Pydantic model from Prisma model instance
-        return SyncedUserResponse.model_validate(db_user)
+        # Convert Prisma model to dict for Pydantic validation
+        return SyncedUserResponse.model_validate(db_user.model_dump())
 
     # User not found, create them
     local_org_id_to_link = None
@@ -666,7 +666,7 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
     
     # Fetch the user again to ensure all fields (like createdAt, updatedAt) are current for the response
     final_user_for_response = await db.user.find_unique(where={"id": created_user.id})
-    return SyncedUserResponse.model_validate(final_user_for_response)
+    return SyncedUserResponse.model_validate(final_user_for_response.model_dump())
 
 @app.post("/users")
 async def create_user(user: UserCreate, clerk_auth_user: Annotated[Any, Depends(get_clerk_user_payload)]):
