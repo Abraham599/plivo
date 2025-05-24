@@ -62,7 +62,7 @@ class ClerkService:
         self, 
         user_id: str, 
         organization_id: str, 
-        role: str = "admin"
+        role: str = "org:admin"
     ) -> OrganizationMembership:
         """
         Add a user to an organization in Clerk
@@ -78,8 +78,10 @@ class ClerkService:
         try:
             # Add user to organization using the correct API format
             # The role must be a valid role in the organization
-            # Default roles in Clerk are 'admin' and 'basic_member'
-            valid_role = role if role in ["admin", "basic_member"] else "basic_member"
+            # Default roles in Clerk are 'org:admin' and 'org:member'
+            valid_role = role
+            if role not in ["org:admin", "org:member"]:
+                valid_role = "org:member" if role == "basic_member" else "org:admin"
             
             # Use the organization_memberships SDK to create a membership
             membership = self.clerk.organization_memberships.create(
