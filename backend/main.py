@@ -952,11 +952,11 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
                             clerk_org_id = clerk_org.id
                             
                             try:
-                                # Add the user to the organization
+                                # Add the user to the organization as admin
                                 await clerk_service.add_user_to_organization(
                                     user_id=clerk_id,
                                     organization_id=clerk_org_id,
-                                    role="org:member"
+                                    role="org:admin"
                                 )
                             except Exception as add_error:
                                 # Log the error but continue with creating the organization in the database
@@ -1003,11 +1003,11 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
                         clerk_org_id = clerk_org.id
                         
                         try:
-                            # Add the user to the organization
+                            # Add the user to the organization as admin
                             await clerk_service.add_user_to_organization(
                                 user_id=clerk_id,
                                 organization_id=clerk_org_id,
-                                role="org:member"
+                                role="org:admin"
                             )
                         except Exception as add_error:
                             # Log the error but continue with creating the organization in the database

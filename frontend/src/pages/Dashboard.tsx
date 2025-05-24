@@ -98,11 +98,24 @@ export default function Dashboard() {
     
     // If the error is about no organization selected, show a more helpful message
     if (errorMessage && errorMessage.includes("No organization selected")) {
+      // Auto-refresh after 3 seconds
+      useEffect(() => {
+        const timer = setTimeout(() => {
+          window.location.reload();
+        }, 3000);
+        
+        return () => clearTimeout(timer);
+      }, []);
+      
       return (
         <div className="flex flex-col items-center justify-center h-screen p-4">
           <h2 className="text-xl font-semibold mb-4">Organization Setup Required</h2>
-          <p className="text-center mb-6">We're setting up your personal workspace. Please refresh the page in a few seconds.</p>
-          <Button onClick={() => window.location.reload()}>Refresh Page</Button>
+          <p className="text-center mb-6">We're setting up your personal workspace. The page will refresh automatically in a few seconds.</p>
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Setting up your workspace...</span>
+          </div>
+          <Button onClick={() => window.location.reload()} className="mt-4">Refresh Now</Button>
         </div>
       );
     }
