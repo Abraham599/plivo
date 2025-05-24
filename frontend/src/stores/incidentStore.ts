@@ -52,15 +52,15 @@ interface IncidentState {
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export const useIncidentStore = create<IncidentState>((set, get) => ({
+export const useIncidentStore = create<IncidentState>((set) => ({
   incidents: [],
   isLoading: false,
   error: null,
 
   fetchIncidents: async (getToken, status?: IncidentStatus) => {
-    const { organization } = useOrganizationStore.getState();
+    const { currentOrganization } = useOrganizationStore.getState();
 
-    if (!organization) {
+    if (!currentOrganization) {
       set({ error: "No organization selected", isLoading: false });
       return;
     }
@@ -70,7 +70,7 @@ export const useIncidentStore = create<IncidentState>((set, get) => ({
       if (!token) {
         throw new Error("Authentication token not available. Please sign in.");
       }
-      let url = `${API_URL}/incidents?organization_id=${organization.id}`;
+      let url = `${API_URL}/incidents?organization_id=${currentOrganization.id}`;
       if (status) {
         url += `&status=${status}`;
       }
@@ -90,8 +90,8 @@ export const useIncidentStore = create<IncidentState>((set, get) => ({
   },
 
   createIncident: async (getToken, title, description, status, service_ids) => {
-    const { organization } = useOrganizationStore.getState();
-    if (!organization) {
+    const { currentOrganization } = useOrganizationStore.getState();
+    if (!currentOrganization) {
       set({ error: "No organization selected", isLoading: false });
       throw new Error("No organization selected");
     }
@@ -102,7 +102,7 @@ export const useIncidentStore = create<IncidentState>((set, get) => ({
       const response = await fetch(`${API_URL}/incidents`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title, description, status, service_ids, organization_id: organization.id }),
+        body: JSON.stringify({ title, description, status, service_ids, organization_id: currentOrganization.id }),
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: "Failed to create incident" }));

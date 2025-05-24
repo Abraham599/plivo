@@ -26,7 +26,7 @@ interface User {
 
 export default function NotificationPreferencesPage() {
   const { getToken } = useAuth()
-  const [user, setUser] = useState<User | null>(null)
+  const [_user, setUser] = useState<User | null>(null) // User data stored but not directly referenced
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [preferences, setPreferences] = useState({

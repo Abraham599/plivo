@@ -14,6 +14,7 @@ from api_auth import ApiKeyAuth
 from clerk_backend_api import Clerk
 from clerk_backend_api.jwks_helpers import AuthenticateRequestOptions
 from clerk_backend_api.models.user import User as ClerkUser
+from clerk_service import ClerkService
 import subprocess
 import sys
 
@@ -62,7 +63,9 @@ uptime_service = UptimeService(db)
 api_key_auth = ApiKeyAuth(db)
 
 # Initialize Clerk SDK
+# Initialize Clerk SDK and service
 clerk = Clerk(bearer_auth=os.getenv("CLERK_SECRET_KEY"))
+clerk_service = ClerkService(clerk)
 
 @app.on_event("startup")
 async def startup():
@@ -220,7 +223,14 @@ class UpdateCreate(BaseModel):
 
 class OrganizationCreate(BaseModel):
     name: str
-    clerk_org_id: str
+    clerk_org_id: Optional[str] = None
+
+class OrganizationCreateWithClerk(BaseModel):
+    name: str
+    slug: Optional[str] = None
+
+class OrganizationSwitchRequest(BaseModel):
+    organization_id: str
 
 class ApiKeyCreate(BaseModel):
     name: str
@@ -230,16 +240,169 @@ class ApiKeyCreate(BaseModel):
 async def root():
     return {"message": "Status Page API"}
 
-# Organization routes
 @app.post("/organizations")
-async def create_organization(org: OrganizationCreate):
-    created_org = await db.organization.create(
-        data={
-            "name": org.name,
-            "clerk_org_id": org.clerk_org_id,
+async def create_organization(org: OrganizationCreate, user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]):
+    """
+    Create an organization in both the database and Clerk (if not already created in Clerk)
+    """
+    # If clerk_org_id is provided, check if it exists in Clerk
+    clerk_org_id = org.clerk_org_id
+    
+    if not clerk_org_id:
+        try:
+            # Create organization in Clerk
+            clerk_org = await clerk_service.create_organization(name=org.name)
+            clerk_org_id = clerk_org.id
+            
+            # Add the current user to the organization
+            await clerk_service.add_user_to_organization(
+                user_id=user.id,
+                organization_id=clerk_org_id,
+                role="admin"
+            )
+        except Exception as e:
+            logger.error(f"Error creating organization in Clerk: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to create organization in Clerk: {str(e)}")
+    
+    # Create organization in database
+    try:
+        created_org = await db.organization.create(
+            data={
+                "name": org.name,
+                "clerk_org_id": clerk_org_id,
+            }
+        )
+        return created_org
+    except Exception as e:
+        # If we created the org in Clerk but failed to create it in the database,
+        # we should clean up by deleting the Clerk org
+        if not org.clerk_org_id:  # Only if we created it in this request
+            try:
+                await clerk_service.delete_organization(clerk_org_id)
+            except Exception as cleanup_error:
+                logger.error(f"Failed to clean up Clerk organization after database error: {cleanup_error}")
+        
+        raise HTTPException(status_code=500, detail=f"Failed to create organization in database: {str(e)}")
+
+@app.get("/organizations")
+async def get_organizations(user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]):
+    """
+    Get all organizations that the current user is a member of
+    """
+    try:
+        # Get user's organization memberships from Clerk
+        memberships = await clerk_service.get_user_organizations(user_id=user.id)
+        
+        if not memberships:
+            return []
+        
+        # Extract organization IDs
+        clerk_org_ids = [membership.organization.id for membership in memberships]
+        
+        # Get organizations from database
+        orgs = await db.organization.find_many(
+            where={"clerk_org_id": {"in": clerk_org_ids}}
+        )
+        
+        # Add Clerk organization details to the response
+        result = []
+        for org in orgs:
+            # Find matching Clerk organization
+            clerk_org = next((m.organization for m in memberships if m.organization.id == org.clerk_org_id), None)
+            
+            if clerk_org:
+                # Get the user's role in this organization
+                role = next((m.role for m in memberships if m.organization.id == org.clerk_org_id), None)
+                
+                result.append({
+                    "id": org.id,
+                    "name": org.name,
+                    "clerk_org_id": org.clerk_org_id,
+                    "createdAt": org.createdAt,
+                    "updatedAt": org.updatedAt,
+                    "clerk_details": {
+                        "name": clerk_org.name,
+                        "slug": clerk_org.slug,
+                        "created_at": clerk_org.created_at,
+                        "role": role
+                    }
+                })
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error getting organizations: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get organizations: {str(e)}")
+
+@app.post("/organizations/{organization_id}/members")
+async def add_organization_member(
+    organization_id: str,
+    member_data: OrganizationMemberCreate,
+    user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
+):
+    """
+    Add a member to an organization
+    """
+    # Verify the organization exists
+    org = await db.organization.find_unique(where={"id": organization_id})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    
+    # Verify the current user is an admin of this organization
+    memberships = await clerk_service.get_user_organizations(user_id=user.id)
+    is_admin = any(m.organization.id == org.clerk_org_id and m.role == "admin" for m in memberships)
+    
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="You must be an admin to add members")
+    
+    # Check if the user exists in Clerk
+    try:
+        clerk_user = clerk.users.get_user_list(email_address=[member_data.email])
+        if not clerk_user or len(clerk_user) == 0:
+            raise HTTPException(status_code=404, detail="User not found in Clerk")
+        
+        clerk_user_id = clerk_user[0].id
+        
+        # Add user to organization in Clerk
+        await clerk_service.add_user_to_organization(
+            user_id=clerk_user_id,
+            organization_id=org.clerk_org_id,
+            role=member_data.role
+        )
+        
+        # Check if user exists in database
+        db_user = await db.user.find_first(where={"clerk_user_id": clerk_user_id})
+        
+        if not db_user:
+            # Create user in database
+            db_user = await db.user.create(
+                data={
+                    "clerk_user_id": clerk_user_id,
+                    "email": member_data.email,
+                    "name": clerk_user[0].first_name,
+                    "organization_id": organization_id
+                }
+            )
+            
+            # Create default notification preferences
+            await db.notificationpreference.create(
+                data={
+                    "user_id": db_user.id,
+                    "serviceStatusChanges": True,
+                    "newIncidents": True,
+                    "incidentUpdates": True,
+                    "incidentResolved": True
+                }
+            )
+        
+        return {
+            "message": "Member added successfully",
+            "user_id": db_user.id,
+            "email": member_data.email,
+            "role": member_data.role
         }
-    )
-    return created_org
+    except Exception as e:
+        logger.error(f"Error adding member to organization: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add member: {str(e)}")
 
 @app.get("/organizations/{clerk_org_id}")
 async def get_organization(clerk_org_id: str):
@@ -250,6 +413,49 @@ async def get_organization(clerk_org_id: str):
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
 
+@app.post("/organizations/switch")
+async def switch_organization(
+    switch_request: OrganizationSwitchRequest,
+    user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
+):
+    """
+    Switch the user's active organization
+    """
+    try:
+        # Verify the organization exists in the database
+        org = await db.organization.find_unique(
+            where={"id": switch_request.organization_id}
+        )
+        
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        # Verify the user is a member of this organization in Clerk
+        memberships = await clerk_service.get_user_organizations(user_id=user.id)
+        is_member = any(m.organization.id == org.clerk_org_id for m in memberships)
+        
+        if not is_member:
+            raise HTTPException(
+                status_code=403, 
+                detail="You are not a member of this organization"
+            )
+        
+        # Update the user's active organization in the database
+        updated_user = await db.user.update(
+            where={"clerk_user_id": user.id},
+            data={"organization_id": switch_request.organization_id}
+        )
+        
+        return {
+            "message": "Organization switched successfully",
+            "organization_id": switch_request.organization_id,
+            "organization_name": org.name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error switching organization: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to switch organization: {str(e)}")
 # Service routes
 @app.post("/services")
 async def create_service(service: ServiceCreate, user: Annotated[Any, Depends(get_clerk_user)]):
@@ -543,95 +749,116 @@ class NotificationPreferenceUpdate(BaseModel):
 @app.post("/users/ensure-synced", response_model=SyncedUserResponse)
 async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]):
     clerk_id = clerk_user_payload.id
-    
+
+    # Get email and name from Clerk user
     primary_email_obj = None
     if clerk_user_payload.primary_email_address_id and clerk_user_payload.email_addresses:
         primary_email_obj = next(
             (em for em in clerk_user_payload.email_addresses if em.id == clerk_user_payload.primary_email_address_id),
             None
         )
-    
+
     if not primary_email_obj:
         if clerk_user_payload.email_addresses:
             primary_email_obj = next(
                 (em for em in clerk_user_payload.email_addresses if em.verification and em.verification.status == 'verified'),
                 None # Try first verified
             )
-            if not primary_email_obj: # Fallback to first email if no verified one found
-                 primary_email_obj = clerk_user_payload.email_addresses[0]
+        if not primary_email_obj: # Fallback to first email if no verified one found
+            primary_email_obj = clerk_user_payload.email_addresses[0]
 
-        if not primary_email_obj: # If still no email
-             raise HTTPException(status_code=400, detail="Primary or verified email not found for Clerk user.")
+    if not primary_email_obj: # If still no email
+        raise HTTPException(status_code=400, detail="Primary or verified email not found for Clerk user.")
 
     email = primary_email_obj.email_address
-    
+
     name = None
     if clerk_user_payload.first_name and clerk_user_payload.last_name:
         name = f"{clerk_user_payload.first_name} {clerk_user_payload.last_name}".strip()
     elif clerk_user_payload.first_name:
         name = clerk_user_payload.first_name
-    elif clerk_user_payload.username: 
+    elif clerk_user_payload.username:
         name = clerk_user_payload.username
 
+    # Check if user exists in database
     db_user = await db.user.find_unique(where={"clerk_user_id": clerk_id})
 
     if db_user:
+        # User exists, update if needed
         updated_data = {}
         if name and db_user.name != name:
             updated_data["name"] = name
         if email and db_user.email != email:
             updated_data["email"] = email
-        # Potentially update organization_id if Clerk org membership changed and your app supports that
-        
+
         if updated_data:
             db_user = await db.user.update(where={"clerk_user_id": clerk_id}, data=updated_data)
-        
-        # Convert Prisma model to dict for Pydantic validation
+
+        # Return existing user
         return SyncedUserResponse.model_validate(db_user.model_dump())
 
     # User not found, create them
     local_org_id_to_link = None
-    
-    # Fetch organization memberships separately using the Clerk API
+
+    # Fetch organization memberships from Clerk
     try:
         # Get all organization memberships for this user
-        org_memberships = clerk.users.get_organization_memberships(user_id=clerk_id)
-        
+        org_memberships = await clerk_service.get_user_organizations(user_id=clerk_id)
+
         if org_memberships and len(org_memberships) > 0:
             # For simplicity, using the first active organization.
-            # Production apps might need more complex logic for multiple orgs.
             active_org_membership = org_memberships[0]
             clerk_org_details = active_org_membership.organization
             clerk_org_id_from_member = clerk_org_details.id
+            
             # Use Clerk org name, or generate one if blank
             org_name_from_clerk = clerk_org_details.name or f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
 
+            # Check if organization exists in database
             local_org = await db.organization.find_unique(where={"clerk_org_id": clerk_org_id_from_member})
             if not local_org:
+                # Create organization in database
                 local_org = await db.organization.create(
                     data={"name": org_name_from_clerk, "clerk_org_id": clerk_org_id_from_member}
                 )
             local_org_id_to_link = local_org.id
         else:
-            # No Clerk organization, create a personal one based on user ID
+            # No Clerk organization, create a personal one
             personal_clerk_org_id = f"personal_user_{clerk_id}" 
             personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
             
+            # Check if personal organization exists
             existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
             if existing_personal_org:
                 local_org_id_to_link = existing_personal_org.id
             else:
-                new_personal_org = await db.organization.create(
-                    data={"name": personal_org_name, "clerk_org_id": personal_clerk_org_id}
-                )
-                local_org_id_to_link = new_personal_org.id
-                
+                # Create personal organization in Clerk
+                try:
+                    clerk_org = await clerk_service.create_organization(name=personal_org_name)
+                    await clerk_service.add_user_to_organization(
+                        user_id=clerk_id,
+                        organization_id=clerk_org.id,
+                        role="admin"
+                    )
+                    
+                    # Create organization in database
+                    new_personal_org = await db.organization.create(
+                        data={"name": personal_org_name, "clerk_org_id": clerk_org.id}
+                    )
+                    local_org_id_to_link = new_personal_org.id
+                except Exception as e:
+                    logger.error(f"Error creating personal organization in Clerk: {e}")
+                    # Fallback to creating a local-only organization
+                    new_personal_org = await db.organization.create(
+                        data={"name": personal_org_name, "clerk_org_id": personal_clerk_org_id}
+                    )
+                    local_org_id_to_link = new_personal_org.id
     except Exception as e:
-        print(f"Error fetching organization memberships for user {clerk_id}: {e}")
+        logger.error(f"Error fetching organization memberships for user {clerk_id}: {e}")
         # Fallback to creating a personal organization
-        personal_clerk_org_id = f"personal_user_{clerk_id}" 
+        personal_clerk_org_id = f"personal_user_{clerk_id}"
         personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
-        
+
         existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
         if existing_personal_org:
             local_org_id_to_link = existing_personal_org.id
@@ -644,15 +871,17 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
     if not local_org_id_to_link:
         raise HTTPException(status_code=500, detail="Failed to determine or create organization for the user.")
 
+    # Create user in database
     created_user_data = {
         "clerk_user_id": clerk_id,
         "email": email,
         "name": name,
         "organization_id": local_org_id_to_link,
     }
-    # Create user first, then notification preferences to avoid nested create issues with some Prisma versions/setups
+
+    # Create user first, then notification preferences
     created_user = await db.user.create(data=created_user_data)
-    
+
     # Create default notification preferences for the new user
     await db.notificationpreference.create(
         data={
@@ -663,11 +892,10 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
             "incidentResolved": True
         }
     )
-    
-    # Fetch the user again to ensure all fields (like createdAt, updatedAt) are current for the response
+
+    # Fetch the user again to ensure all fields are current
     final_user_for_response = await db.user.find_unique(where={"id": created_user.id})
     return SyncedUserResponse.model_validate(final_user_for_response.model_dump())
-
 @app.post("/users")
 async def create_user(user: UserCreate, clerk_auth_user: Annotated[Any, Depends(get_clerk_user_payload)]):
     # Check if user already exists

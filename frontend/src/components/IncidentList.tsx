@@ -103,7 +103,7 @@ const IncidentList: React.FC = () => {
     setError(null);
     try {
       const token = await getToken();
-      const created = await createIncident(
+      await createIncident(
         {
           ...newIncident,
           organization_id: organization.id,

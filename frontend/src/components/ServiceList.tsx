@@ -65,7 +65,7 @@ const ServiceList: React.FC = () => {
     setError(null);
     try {
       const token = await getToken();
-      const created = await createService(
+      await createService(
         {
           ...newService,
           organization_id: organization.id,

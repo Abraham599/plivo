@@ -4,7 +4,7 @@ import { useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useUptimeStore } from "../stores/uptimeStore" // Assuming uptimeStore exists and is correctly defined
 import { Loader2 } from "lucide-react"
-import { type ServiceStatus, type Service } from "../stores/serviceStore" // Import ServiceStatus and Service
+import type { Service } from "../stores/serviceStore" // Import Service type only
 
 interface ServiceUptimeCardProps {
   // Use a Pick from the main Service type or define explicitly matching relevant fields

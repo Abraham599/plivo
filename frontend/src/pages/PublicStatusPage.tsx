@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { format } from "date-fns"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, type TooltipProps } from "recharts"
 
@@ -57,7 +57,9 @@ export default function PublicStatusPage() {
   const [uptimeMetrics, setUptimeMetrics] = useState<Record<string, UptimeMetric[]>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [websocket, setWebsocket] = useState<WebSocket | null>(null)
+  // We'll track the websocket connection without using state since we don't need to re-render on changes
+  // This avoids the unused variable warning
+  const websocketRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
     const apiUrl = getApiUrl()
@@ -116,13 +118,13 @@ export default function PublicStatusPage() {
 
     // Set up WebSocket connection
     try {
-      const ws = new WebSocket(`${wsUrl}/ws`)
+      websocketRef.current = new WebSocket(`${wsUrl}/ws`)
 
-      ws.onopen = () => {
+      websocketRef.current.onopen = () => {
         console.log("WebSocket connected")
       }
 
-      ws.onmessage = (event) => {
+      websocketRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
 
@@ -147,19 +149,19 @@ export default function PublicStatusPage() {
         }
       }
 
-      ws.onerror = (error) => {
+      websocketRef.current.onerror = (error) => {
         console.error("WebSocket error:", error)
       }
 
-      ws.onclose = () => {
+      websocketRef.current.onclose = () => {
         console.log("WebSocket disconnected")
       }
 
-      setWebsocket(ws)
+      // websocket is now tracked via ref
 
       return () => {
-        if (ws) {
-          ws.close()
+        if (websocketRef.current) {
+          websocketRef.current.close()
         }
       }
     } catch (error) {

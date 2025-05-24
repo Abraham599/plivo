@@ -5,7 +5,7 @@ import Dashboard from './pages/Dashboard';
 import PublicStatusPage from './pages/PublicStatusPage';
 import CustomSignUp from './components/auth/CustomSignUp';
 import './App.css';
-import CustomSignIn from './components/auth/CustomSignin';
+import CustomSignIn from './components/auth/CustomSignIn';
 import AuthSyncer from './components/auth/AuthSync';
 
 // ProtectedRoute component
