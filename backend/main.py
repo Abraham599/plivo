@@ -232,6 +232,10 @@ class OrganizationCreateWithClerk(BaseModel):
 class OrganizationSwitchRequest(BaseModel):
     organization_id: str
 
+class OrganizationMemberCreate(BaseModel):
+    email: str
+    role: str = "basic_member"
+
 class ApiKeyCreate(BaseModel):
     name: str
 
