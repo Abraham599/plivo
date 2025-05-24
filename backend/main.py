@@ -355,11 +355,21 @@ async def get_organizations(user: Annotated[ClerkUser, Depends(get_clerk_user_pa
         result = []
         for org in orgs:
             # Find matching Clerk organization
-            clerk_org = next((m.organization for m in memberships if m.organization.id == org.clerk_org_id), None)
+            clerk_org = None
+            role = None
             
+            for m in memberships:
+                # Check if membership has organization as attribute or dict key
+                if hasattr(m, 'organization') and m.organization.id == org.clerk_org_id:
+                    clerk_org = m.organization
+                    role = m.role
+                    break
+                elif isinstance(m, dict) and 'organization' in m and m['organization'].id == org.clerk_org_id:
+                    clerk_org = m['organization']
+                    role = m['role']
+                    break
+                    
             if clerk_org:
-                # Get the user's role in this organization
-                role = next((m.role for m in memberships if m.organization.id == org.clerk_org_id), None)
                 
                 result.append({
                     "id": org.id,
@@ -368,9 +378,9 @@ async def get_organizations(user: Annotated[ClerkUser, Depends(get_clerk_user_pa
                     "createdAt": org.createdAt,
                     "updatedAt": org.updatedAt,
                     "clerk_details": {
-                        "name": clerk_org.name,
-                        "slug": clerk_org.slug,
-                        "created_at": clerk_org.created_at,
+                        "name": getattr(clerk_org, 'name', ''),
+                        "slug": getattr(clerk_org, 'slug', ''),
+                        "created_at": getattr(clerk_org, 'created_at', ''),
                         "role": role
                     }
                 })
@@ -396,7 +406,19 @@ async def add_organization_member(
     
     # Verify the current user is an admin of this organization
     memberships = await clerk_service.get_user_organizations(user_id=user.id)
-    is_admin = any(m.organization.id == org.clerk_org_id and m.role == "admin" for m in memberships)
+    is_admin = False
+    
+    # Check each membership to see if the user is an admin of this organization
+    for m in memberships:
+        # Check if membership has organization as attribute or dict key
+        if hasattr(m, 'organization') and hasattr(m, 'role'):
+            if m.organization.id == org.clerk_org_id and m.role == "admin":
+                is_admin = True
+                break
+        elif isinstance(m, dict) and 'organization' in m and 'role' in m:
+            if m['organization'].id == org.clerk_org_id and m['role'] == "admin":
+                is_admin = True
+                break
     
     if not is_admin:
         raise HTTPException(status_code=403, detail="You must be an admin to add members")
@@ -479,7 +501,19 @@ async def switch_organization(
         
         # Verify the user is a member of this organization in Clerk
         memberships = await clerk_service.get_user_organizations(user_id=user.id)
-        is_member = any(m.organization.id == org.clerk_org_id for m in memberships)
+        is_member = False
+        
+        # Check each membership to see if the user is a member of this organization
+        for m in memberships:
+            # Check if membership has organization as attribute or dict key
+            if hasattr(m, 'organization') and hasattr(m.organization, 'id'):
+                if m.organization.id == org.clerk_org_id:
+                    is_member = True
+                    break
+            elif isinstance(m, dict) and 'organization' in m:
+                if hasattr(m['organization'], 'id') and m['organization'].id == org.clerk_org_id:
+                    is_member = True
+                    break
         
         if not is_member:
             raise HTTPException(
@@ -856,20 +890,84 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
         if org_memberships and isinstance(org_memberships, list) and org_memberships:
             # For simplicity, using the first active organization.
             active_org_membership = org_memberships[0]
-            clerk_org_details = active_org_membership.organization
-            clerk_org_id_from_member = clerk_org_details.id
             
-            # Use Clerk org name, or generate one if blank
-            org_name_from_clerk = clerk_org_details.name or f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
+            # Initialize variables
+            clerk_org_details = None
+            clerk_org_id_from_member = None
+            
+            # Check if the membership has the organization property
+            if hasattr(active_org_membership, 'organization'):
+                clerk_org_details = active_org_membership.organization
+                if hasattr(clerk_org_details, 'id'):
+                    clerk_org_id_from_member = clerk_org_details.id
+            elif isinstance(active_org_membership, dict) and 'organization' in active_org_membership:
+                clerk_org_details = active_org_membership['organization']
+                if hasattr(clerk_org_details, 'id'):
+                    clerk_org_id_from_member = clerk_org_details.id
+                    
+            # If we couldn't get the organization ID, skip this section
+            if not clerk_org_id_from_member:
+                logger.warning(f"Could not get organization ID from membership for user {clerk_id}")
+                clerk_org_details = None
+            
+            # Only proceed if we have organization details
+            if clerk_org_details and clerk_org_id_from_member:
+                # Use Clerk org name, or generate one if blank
+                org_name_from_clerk = getattr(clerk_org_details, 'name', None)
+                if not org_name_from_clerk:
+                    org_name_from_clerk = f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
 
-            # Check if organization exists in database
-            local_org = await db.organization.find_unique(where={"clerk_org_id": clerk_org_id_from_member})
-            if not local_org:
-                # Create organization in database
-                local_org = await db.organization.create(
-                    data={"name": org_name_from_clerk, "clerk_org_id": clerk_org_id_from_member}
-                )
-            local_org_id_to_link = local_org.id
+                # Check if organization exists in database
+                local_org = await db.organization.find_unique(where={"clerk_org_id": clerk_org_id_from_member})
+                
+                if local_org:
+                    local_org_id_to_link = local_org.id
+                else:
+                    # Create organization in database
+                    local_org = await db.organization.create(
+                        data={"name": org_name_from_clerk, "clerk_org_id": clerk_org_id_from_member}
+                    )
+                    local_org_id_to_link = local_org.id
+            else:
+                # No organization details, create a personal one
+                personal_clerk_org_id = f"personal_user_{clerk_id}" 
+                personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
+                
+                # Check if personal organization exists
+                try:
+                    existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
+                    if existing_personal_org:
+                        local_org_id_to_link = existing_personal_org.id
+                    else:
+                        # Create personal organization in Clerk
+                        try:
+                            # Create organization with the correct parameters
+                            organization_data = {"name": personal_org_name}
+                            clerk_org = await clerk_service.create_organization(name=personal_org_name)
+                            
+                            # Add the user to the organization
+                            await clerk_service.add_user_to_organization(
+                                user_id=clerk_id,
+                                organization_id=clerk_org.id,
+                                role="admin"
+                            )
+                            
+                            # Create organization in database
+                            new_personal_org = await db.organization.create(
+                                data={"name": personal_org_name, "clerk_org_id": clerk_org.id}
+                            )
+                            local_org_id_to_link = new_personal_org.id
+                        except Exception as e:
+                            logger.error(f"Error creating personal organization in Clerk: {e}")
+                            new_personal_org = await db.organization.create(
+                                data={"name": personal_org_name, "clerk_org_id": f"personal_user_{clerk_id}"}
+                            )
+                            local_org_id_to_link = new_personal_org.id
+                            logger.info(f"Created local-only organization for user {clerk_id}")
+                except Exception as db_error:
+                    logger.error(f"Failed to create organization in database: {db_error}")
+                    # We'll create the user without an organization link
+                    local_org_id_to_link = None
         else:
             # No Clerk organization, create a personal one
             personal_clerk_org_id = f"personal_user_{clerk_id}" 

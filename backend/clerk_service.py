@@ -27,15 +27,16 @@ class ClerkService:
         """
         try:
             # Create organization in Clerk with the correct parameters
-            # The API expects a dictionary with the organization data
-            organization_data = {}
-            if name:
-                organization_data["name"] = name
+            # The API expects a request dictionary with the organization data
+            request = {
+                "name": name
+            }
+            
             if slug:
-                organization_data["slug"] = slug
+                request["slug"] = slug
                 
             # Create the organization using the correct method
-            organization = self.clerk.organizations.create_organization(organization_data)
+            organization = self.clerk.organizations.create(request=request)
             logger.info(f"Created organization in Clerk: {organization.id} - {name}")
             return organization
         except Exception as e:
@@ -87,7 +88,7 @@ class ClerkService:
             logger.error(f"Error adding user to organization: {e}")
             raise
     
-    async def get_user_organizations(self, user_id: str) -> List[OrganizationMembership]:
+    async def get_user_organizations(self, user_id: str) -> List[dict]:
         """
         Get all organizations that a user is a member of
         
@@ -95,27 +96,38 @@ class ClerkService:
             user_id: The Clerk user ID
             
         Returns:
-            List of organization memberships
+            List of organization memberships with organization details
         """
         try:
             # Get user's organization memberships
             memberships = self.clerk.users.get_organization_memberships(user_id=user_id)
             
-            # Convert to a list if it's not already
-            if not isinstance(memberships, list):
-                # Handle the case where memberships might be a custom object
-                # that doesn't support len() directly
-                memberships_list = []
-                # Try to iterate through the memberships object
-                try:
-                    for membership in memberships:
-                        memberships_list.append(membership)
-                    return memberships_list
-                except Exception as iter_error:
-                    logger.error(f"Error iterating through memberships: {iter_error}")
-                    # If we can't iterate, return an empty list
-                    return []
-            return memberships
+            # Create a list of membership objects with organization details
+            result = []
+            
+            # Check if memberships is a list or tuple
+            if isinstance(memberships, (list, tuple)):
+                for membership in memberships:
+                    # Check if membership is a tuple (id, role) or an object
+                    if isinstance(membership, tuple) and len(membership) >= 2:
+                        # It's a tuple with (org_id, role)
+                        org_id, role = membership[0], membership[1]
+                        
+                        # Get organization details
+                        try:
+                            org = self.clerk.organizations.get_organization(organization_id=org_id)
+                            # Create a membership object with organization details
+                            result.append({
+                                "role": role,
+                                "organization": org
+                            })
+                        except Exception as org_error:
+                            logger.error(f"Error getting organization details: {org_error}")
+                    else:
+                        # It's already an object with organization details
+                        result.append(membership)
+            
+            return result
         except Exception as e:
             logger.error(f"Error getting user organizations: {e}")
             return []  # Return empty list instead of raising to avoid breaking the flow
