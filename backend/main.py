@@ -6,6 +6,10 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
+import logging
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 # Change this import
 from prisma import Prisma
 from notification_service import NotificationService
@@ -852,25 +856,51 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
                     local_org_id_to_link = new_personal_org.id
                 except Exception as e:
                     logger.error(f"Error creating personal organization in Clerk: {e}")
-                    # Fallback to creating a local-only organization
                     new_personal_org = await db.organization.create(
-                        data={"name": personal_org_name, "clerk_org_id": personal_clerk_org_id}
+                        data={"name": personal_org_name, "clerk_org_id": f"personal_user_{clerk_id}"}
                     )
                     local_org_id_to_link = new_personal_org.id
+                    logger.info(f"Created local-only organization for user {clerk_id}")
+            except Exception as db_error:
+                logger.error(f"Failed to create organization in database: {db_error}")
+                # We'll create the user without an organization link
+                local_org_id_to_link = None
     except Exception as e:
         logger.error(f"Error fetching organization memberships for user {clerk_id}: {e}")
-        # Fallback to creating a personal organization
-        personal_clerk_org_id = f"personal_user_{clerk_id}"
-        personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
-
-        existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
-        if existing_personal_org:
-            local_org_id_to_link = existing_personal_org.id
-        else:
-            new_personal_org = await db.organization.create(
-                data={"name": personal_org_name, "clerk_org_id": personal_clerk_org_id}
-            )
-            local_org_id_to_link = new_personal_org.id
+        # If we can't fetch orgs, create a local-only organization
+        try:
+            personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
+            
+            # First try to create the organization in Clerk
+            try:
+                clerk_org = await clerk_service.create_organization(name=personal_org_name)
+                clerk_org_id = clerk_org.id
+                
+                # Add the user to the organization
+                await clerk_service.add_user_to_organization(
+                    user_id=clerk_id,
+                    organization_id=clerk_org_id,
+                    role="admin"
+                )
+                
+                # Create the organization in the database
+                new_personal_org = await db.organization.create(
+                    data={"name": personal_org_name, "clerk_org_id": clerk_org_id}
+                )
+                local_org_id_to_link = new_personal_org.id
+                logger.info(f"Created new organization in Clerk and database for user {clerk_id}")
+            except Exception as clerk_error:
+                logger.error(f"Failed to create organization in Clerk: {clerk_error}")
+                # Fallback to local-only organization
+                new_personal_org = await db.organization.create(
+                    data={"name": personal_org_name, "clerk_org_id": f"personal_user_{clerk_id}"}
+                )
+                local_org_id_to_link = new_personal_org.id
+                logger.info(f"Created local-only organization for user {clerk_id}")
+        except Exception as db_error:
+            logger.error(f"Failed to create organization in database: {db_error}")
+            # We'll create the user without an organization link
+            local_org_id_to_link = None
 
     if not local_org_id_to_link:
         raise HTTPException(status_code=500, detail="Failed to determine or create organization for the user.")
