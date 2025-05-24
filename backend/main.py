@@ -130,7 +130,7 @@ async def get_clerk_user_payload(request: Request, authorization: Annotated[Opti
         # Fetch the full user object from Clerk API using the user_id from the token
         try:
             # clerk.users is an instance of UsersApi, get_user is a method on it
-            fetched_user: ClerkUser = clerk.users.get_user(user_id=user_id)
+            fetched_user: ClerkUser = clerk.users.get(user_id=user_id)
             return fetched_user
         except Exception as e:
             # Catch specific exceptions from Clerk SDK if possible, e.g., clerk_backend_api.errors.ApiException
@@ -175,7 +175,7 @@ async def get_clerk_user(request: Request, authorization: Annotated[Optional[str
         user_id = request_state.payload.get('sub')
 
         try:
-            fetched_user: ClerkUser = clerk.users.get_user(user_id=user_id)
+            fetched_user: ClerkUser = clerk.users.get(user_id=user_id)
             return fetched_user
         except Exception as e:
             print(f"Failed to fetch user (ID: {user_id}) details from Clerk in get_clerk_user: {type(e).__name__} - {e}")
