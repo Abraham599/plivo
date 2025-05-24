@@ -106,16 +106,13 @@ async def get_clerk_user(request: Request, authorization: Annotated[Optional[str
         raise HTTPException(status_code=401, detail="Authorization header missing")
     
     try:
-        # Extract the token from the Authorization header
-        token = authorization.replace("Bearer ", "")
-        
-        # Authenticate the request (fix: pass token as kwarg in options)
+        # The SDK will extract the token from the request headers
+        # Remove the 'token=token' argument from AuthenticateRequestOptions
         request_state = clerk.authenticate_request(
             request,
             AuthenticateRequestOptions(
                 # You can specify authorized parties if needed
-                # authorized_parties=["your-domain.com"],
-                token=token
+                # authorized_parties=["your-domain.com"], # Example
             )
         )
         
@@ -125,20 +122,26 @@ async def get_clerk_user(request: Request, authorization: Annotated[Optional[str
         # Return the user data
         return request_state.user
     except Exception as e:
+        # It's good to log the actual exception for debugging
+        print(f"Authentication error in get_clerk_user: {e}")
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
 async def get_clerk_user_payload(request: Request, authorization: Annotated[Optional[str], Header()] = None) -> ClerkUserType:
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header missing")
     try:
-        token = authorization.replace("Bearer ", "")
+        # The SDK will extract the token from the request headers
+        # Remove the 'token=token' argument from AuthenticateRequestOptions
         request_state = clerk.authenticate_request(
-            request, AuthenticateRequestOptions(token=token)
+            request, 
+            AuthenticateRequestOptions() # Pass empty options if none are needed
         )
         if not request_state.is_signed_in or not request_state.user:
             raise HTTPException(status_code=401, detail="Not authenticated or user data missing")
         return request_state.user
     except Exception as e:
+        # It's good to log the actual exception for debugging
+        print(f"Authentication error in get_clerk_user_payload: {e}")
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
 # Models
