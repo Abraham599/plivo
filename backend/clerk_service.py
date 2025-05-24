@@ -1,7 +1,5 @@
 from clerk_backend_api import Clerk
-from clerk_backend_api.models.organization import Organization as ClerkOrganization
-from clerk_backend_api.models.user import User as ClerkUser
-from clerk_backend_api.models.organization_membership import OrganizationMembership
+
 from typing import List, Optional, Dict, Any
 import os
 import logging
