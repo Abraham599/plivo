@@ -24,7 +24,7 @@ app = FastAPI(title="Status Page API")
 
 allowed_origins = [
     "http://localhost:5173",  # Example: Common Vite dev server
-    "https://your-custom-frontend-domain.com",    # Example: Your custom domain for the frontend
+    "https://public-status-page.vercel.app",    # Example: Your custom domain for the frontend
     # Add any other origins your frontend might be served from
 ]
 
