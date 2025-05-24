@@ -28,12 +28,24 @@ const CustomSignUp = () => {
     setError('');
 
     try {
+      // Create the sign-up without first/last name
       await signUp.create({
         emailAddress: email,
         password,
-        firstName,
-        lastName,
       });
+      
+      // Set first/last name after creating the sign-up
+      if (firstName || lastName) {
+        try {
+          await signUp.update({
+            firstName,
+            lastName,
+          });
+        } catch (nameError) {
+          console.error("Error setting name:", nameError);
+          // Continue with verification even if name setting fails
+        }
+      }
 
       // Send email verification code
       await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
