@@ -505,13 +505,15 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUserType, Depend
         )
     
     if not primary_email_obj:
-        # Fallback if primary_email_address_id is not set, try first verified email
         if clerk_user_payload.email_addresses:
             primary_email_obj = next(
                 (em for em in clerk_user_payload.email_addresses if em.verification and em.verification.status == 'verified'),
-                clerk_user_payload.email_addresses[0] if clerk_user_payload.email_addresses else None
+                None # Try first verified
             )
-        if not primary_email_obj:
+            if not primary_email_obj: # Fallback to first email if no verified one found
+                 primary_email_obj = clerk_user_payload.email_addresses[0]
+
+        if not primary_email_obj: # If still no email
              raise HTTPException(status_code=400, detail="Primary or verified email not found for Clerk user.")
 
     email = primary_email_obj.email_address
@@ -521,7 +523,7 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUserType, Depend
         name = f"{clerk_user_payload.first_name} {clerk_user_payload.last_name}".strip()
     elif clerk_user_payload.first_name:
         name = clerk_user_payload.first_name
-    elif clerk_user_payload.username: # Fallback to username
+    elif clerk_user_payload.username: 
         name = clerk_user_payload.username
 
 
@@ -531,33 +533,29 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUserType, Depend
         updated_data = {}
         if name and db_user.name != name:
             updated_data["name"] = name
-        if email and db_user.email != email: # Email might change in Clerk
+        if email and db_user.email != email:
             updated_data["email"] = email
+        # Potentially update organization_id if Clerk org membership changed and your app supports that
         
         if updated_data:
             db_user = await db.user.update(where={"clerk_user_id": clerk_id}, data=updated_data)
         
-        return SyncedUserResponse(
-            id=db_user.id,
-            clerk_user_id=db_user.clerk_user_id,
-            email=db_user.email,
-            name=db_user.name,
-            organization_id=db_user.organization_id,
-            createdAt=db_user.createdAt, # Prisma uses createdAt
-            updatedAt=db_user.updatedAt, # Prisma uses updatedAt
-        )
+        # Use from_orm to construct Pydantic model from Prisma model instance
+        return SyncedUserResponse.model_validate(db_user)
+
 
     # User not found, create them
     local_org_id_to_link = None
     
-    # Check Clerk organization memberships
     if clerk_user_payload.organization_memberships and len(clerk_user_payload.organization_memberships) > 0:
-        # Assuming the first organization membership is the relevant one
-        # You might need more sophisticated logic if a user can be in multiple Clerk orgs
-        # and you need to pick a specific one to be their "primary" in your app.
-        clerk_org_details = clerk_user_payload.organization_memberships[0].organization
+        # For simplicity, using the first active organization.
+        # Production apps might need more complex logic for multiple orgs.
+        active_org_membership = clerk_user_payload.organization_memberships[0]
+        clerk_org_details = active_org_membership.organization
         clerk_org_id_from_member = clerk_org_details.id
-        org_name_from_clerk = clerk_org_details.name or f"{name}'s Organization"
+        # Use Clerk org name, or generate one if blank
+        org_name_from_clerk = clerk_org_details.name or f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
+
 
         local_org = await db.organization.find_unique(where={"clerk_org_id": clerk_org_id_from_member})
         if not local_org:
@@ -566,9 +564,9 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUserType, Depend
             )
         local_org_id_to_link = local_org.id
     else:
-        # No Clerk organization, create a personal one
-        personal_clerk_org_id = f"personal_{clerk_id}" # Unique identifier for this personal org
-        personal_org_name = f"{name}'s Workspace" if name else f"{email.split('@')[0]}'s Workspace"
+        # No Clerk organization, create a personal one based on user ID
+        personal_clerk_org_id = f"personal_user_{clerk_id}" 
+        personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
         
         existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
         if existing_personal_org:
@@ -582,33 +580,29 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUserType, Depend
     if not local_org_id_to_link:
         raise HTTPException(status_code=500, detail="Failed to determine or create organization for the user.")
 
-    created_user = await db.user.create(
+    created_user_data = {
+        "clerk_user_id": clerk_id,
+        "email": email,
+        "name": name,
+        "organization_id": local_org_id_to_link,
+    }
+    # Create user first, then notification preferences to avoid nested create issues with some Prisma versions/setups
+    created_user = await db.user.create(data=created_user_data)
+    
+    # Create default notification preferences for the new user
+    await db.notificationpreference.create(
         data={
-            "clerk_user_id": clerk_id,
-            "email": email,
-            "name": name,
-            "organization_id": local_org_id_to_link,
-            "notificationPreferences": {
-                "create": {
-                    "serviceStatusChanges": True,
-                    "newIncidents": True,
-                    "incidentUpdates": True,
-                    "incidentResolved": True
-                }
-            }
-        },
-        include={"organization": True} # To ensure organization_id is populated correctly
+            "user_id": created_user.id,
+            "serviceStatusChanges": True,
+            "newIncidents": True,
+            "incidentUpdates": True,
+            "incidentResolved": True
+        }
     )
     
-    return SyncedUserResponse(
-        id=created_user.id,
-        clerk_user_id=created_user.clerk_user_id,
-        email=created_user.email,
-        name=created_user.name,
-        organization_id=created_user.organization_id, # This comes directly from created_user now
-        createdAt=created_user.createdAt,
-        updatedAt=created_user.updatedAt,
-    )
+    # Fetch the user again to ensure all fields (like createdAt, updatedAt) are current for the response
+    final_user_for_response = await db.user.find_unique(where={"id": created_user.id})
+    return SyncedUserResponse.model_validate(final_user_for_response)
 
 
 @app.post("/users")

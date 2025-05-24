@@ -6,6 +6,7 @@ import PublicStatusPage from './pages/PublicStatusPage';
 import CustomSignUp from './components/auth/CustomSignUp';
 import './App.css';
 import CustomSignIn from './components/auth/CustomSignin';
+import AuthSyncer from './components/auth/AuthSync';
 
 // ProtectedRoute component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => (
@@ -20,6 +21,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => (
 const App = () => {
   return (
     <Router>
+      <AuthSyncer />
       <Routes>
         <Route
           path="/sign-in"

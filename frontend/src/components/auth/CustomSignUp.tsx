@@ -3,7 +3,7 @@ import { useAuth, useSignUp } from '@clerk/clerk-react';
 import { useNavigate, Link } from 'react-router-dom';
 import type { SessionResource } from '@clerk/types';
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL;
 
 const CustomSignUp = () => {
   const { isLoaded, signUp, setActive } = useSignUp();
@@ -92,6 +92,9 @@ const CustomSignUp = () => {
                     'Authorization': `Bearer ${token}`,
                   },
                 });
+
+                console.log("Sync response status:", syncResponse.status); // Log status
+
   
                 if (!syncResponse.ok) {
                   const errorData = await syncResponse.json().catch(() => ({detail: "Failed to sync user."}));
