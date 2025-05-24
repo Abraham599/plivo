@@ -35,14 +35,15 @@ class ClerkService:
             return organization
         except Exception as e:
             logger.error(f"Error creating organization in Clerk: {e}")
-            raise
+            # Instead of raising, return None to allow fallback handling
+            return None
     
     async def add_user_to_organization(
         self, 
         user_id: str, 
         organization_id: str, 
         role: str = "admin"
-    ) -> OrganizationMembership:
+    ) -> Optional[OrganizationMembership]:
         """
         Add a user to an organization in Clerk
         
@@ -52,11 +53,11 @@ class ClerkService:
             role: The role of the user in the organization
             
         Returns:
-            The created organization membership
+            The created organization membership or None if there was an error
         """
         try:
             # Add user to organization
-            membership = self.clerk.organization_memberships.create(
+            membership = self.clerk.organizations.create_membership(
                 organization_id=organization_id,
                 user_id=user_id,
                 role=role
@@ -65,7 +66,8 @@ class ClerkService:
             return membership
         except Exception as e:
             logger.error(f"Error adding user to organization: {e}")
-            raise
+            # Return None instead of raising to allow fallback handling
+            return None
     
     async def get_user_organizations(self, user_id: str) -> List[OrganizationMembership]:
         """
