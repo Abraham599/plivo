@@ -79,16 +79,6 @@ model NotificationPreference {
   updatedAt         DateTime  @updatedAt
 }
 
-// Models for uptime tracking
-model UptimeCheck {
-  id          String    @id @default(uuid())
-  service     Service   @relation(fields: [service_id], references: [id])
-  service_id  String
-  status      String    // up, down
-  responseTime Int?     // in milliseconds
-  timestamp   DateTime  @default(now())
-}
-
 model UptimeCheck {
   id              String   @id @default(uuid())
   service_id      String

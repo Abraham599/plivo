@@ -4,10 +4,10 @@ import { useEffect, useState } from "react"
 import type { Service, ServiceStatus } from "../stores/serviceStore"
 import type { Incident } from "../stores/incidentStore"
 import type { IncidentStatus } from "../lib/format"
-import type { Organization } from "../api/userApi";
+import type { Organization } from "../api/userApi"
 import { useAuth } from "@clerk/clerk-react"
 import { format } from "date-fns"
-import { getApiUrl, getToken } from "../lib/api"
+import { getApiUrl } from "../lib/api"
 import { formatServiceStatusDisplayName, formatIncidentStatusDisplayName } from "../lib/format"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 
@@ -32,39 +32,39 @@ export default function Dashboard() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { getToken } = useAuth();
 
   const fetchData = async (organizationId?: string | null): Promise<void> => {
     try {
       const token = await getToken();
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      };
+      
       // Fetch services
-      const servicesResponse = await fetch(`${getApiUrl()}/services${organizationId ? `?organization_id=${organizationId}` : ''}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const servicesResponse = await fetch(
+        `${getApiUrl()}/services${organizationId ? `?organization_id=${organizationId}` : ''}`, 
+        { headers }
+      );
       if (!servicesResponse.ok) throw new Error("Failed to fetch services");
       const servicesData = await servicesResponse.json();
       setServices(servicesData);
 
       // Fetch incidents
-      const incidentsResponse = await fetch(`${getApiUrl()}/incidents${organizationId ? `?organization_id=${organizationId}` : ''}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const incidentsResponse = await fetch(
+        `${getApiUrl()}/incidents${organizationId ? `?organization_id=${organizationId}` : ''}`,
+        { headers }
+      );
       if (!incidentsResponse.ok) throw new Error("Failed to fetch incidents");
       const incidentsData = await incidentsResponse.json();
       setIncidents(incidentsData);
 
       // Fetch organizations
-      const orgsResponse = await fetch(`${getApiUrl()}/organizations`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const orgsResponse = await fetch(
+        `${getApiUrl()}/organizations`,
+        { headers }
+      );
       if (!orgsResponse.ok) throw new Error("Failed to fetch organizations");
       const orgsData = await orgsResponse.json();
       setOrganizations(orgsData);
@@ -479,15 +479,7 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                       >
                         Start Maintenance
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        asChild
-                      >
-                        <Link to={`/incidents/${incident.id}`}>
-                          View details
-                        </Link>
-                      </Button>
+                     
                     </div>
                   </div>
                 ))}

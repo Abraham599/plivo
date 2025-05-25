@@ -3,15 +3,23 @@ export const getApiUrl = () => {
   return import.meta.env.VITE_API_URL || "http://localhost:8000";
 };
 
-// Get auth token from Clerk
+// This function should be called from within a component that has access to Clerk's hooks
 export const getToken = async (): Promise<string | null> => {
   try {
-    // Get the token from Clerk's session
-    const { useAuth } = await import('@clerk/clerk-react');
-    const { getToken } = useAuth();
-    return await getToken();
+    // This is a fallback that should be replaced with the actual token from the component
+    // that's using Clerk's useAuth hook
+    return null;
   } catch (error) {
     console.error('Error getting auth token:', error);
     return null;
   }
+};
+
+// Helper function to create authenticated fetch options
+export const getAuthHeaders = async (): Promise<HeadersInit> => {
+  const token = await getToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
 };
