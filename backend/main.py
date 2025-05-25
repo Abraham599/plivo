@@ -1416,8 +1416,8 @@ async def trigger_service_check(
 @app.get("/services/{service_id}/metrics/uptime")
 async def get_service_uptime_metrics(
     service_id: str,
-    period: str = Query("7d", regex="^(24h|7d|30d)$"),
-    user: Annotated[Any, Depends(get_clerk_user)]
+    user: Annotated[Any, Depends(get_clerk_user)],
+    period: str = Query("7d", regex="^(24h|7d|30d)$")
 ):
     """
     Get uptime metrics for a service
