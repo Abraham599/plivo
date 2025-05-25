@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 from prisma import Prisma
 from notification_service import NotificationService
 from uptime_service import UptimeService
-from api_auth import ApiKeyAuth
+
 from clerk_backend_api import Clerk
 from clerk_backend_api.jwks_helpers import AuthenticateRequestOptions
 from clerk_backend_api.models.user import User as ClerkUser
@@ -65,7 +65,7 @@ db = Prisma(auto_register=True)
 # Initialize services after Prisma client
 notification_service = NotificationService(db)
 uptime_service = UptimeService(db)
-api_key_auth = ApiKeyAuth(db)
+
 
 # Initialize Clerk SDK
 # Initialize Clerk SDK and service
@@ -241,8 +241,7 @@ class OrganizationMemberCreate(BaseModel):
     email: str
     role: str = "basic_member"
 
-class ApiKeyCreate(BaseModel):
-    name: str
+
 
 # Routes
 @app.get("/")
@@ -761,6 +760,46 @@ async def delete_incident(incident_id: str, user: Annotated[Any, Depends(get_cle
     return {"message": "Incident deleted"}
 
 # Update routes
+@app.post("/incidents/{incident_id}/updates")
+async def create_incident_update(
+    incident_id: str,
+    update: UpdateCreate,
+    user: Annotated[Any, Depends(get_clerk_user)]
+):
+    # Ensure the incident exists
+    incident = await db.incident.find_unique(where={"id": incident_id})
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    
+    # Create the update with the incident ID from the path
+    update_data = update.dict()
+    update_data["incident_id"] = incident_id
+    
+    # Create the update
+    new_update = await db.update.create(
+        data={
+            "message": update.message,
+            "incident": {"connect": {"id": incident_id}},
+            "created_by": user.id,
+        },
+        include={"incident": True}
+    )
+    
+    # Notify WebSocket clients
+    await manager.broadcast({
+        "type": "update_created",
+        "data": {
+            "id": new_update.id,
+            "message": new_update.message,
+            "created_at": new_update.created_at.isoformat(),
+            "incident_id": new_update.incident_id,
+            "created_by": user.id
+        }
+    })
+    
+    return new_update
+
+# Original update endpoint
 @app.post("/updates")
 async def create_update(update: UpdateCreate, user: Annotated[Any, Depends(get_clerk_user)]):
     created_update = await db.update.create(
@@ -822,10 +861,91 @@ class SyncedUserResponse(BaseModel):
 
 
 class NotificationPreferenceUpdate(BaseModel):
+    pass
+
+class NotificationPreferenceResponse(BaseModel):
+    serviceStatusChanges: bool
+    newIncidents: bool
+    incidentUpdates: bool
+    incidentResolved: bool
+
+# The pass for NotificationPreferenceUpdate is a placeholder to ensure the class definition itself is not removed if it's the exact target. The original content of NotificationPreferenceUpdate should be preserved by the tool if it's smart, or I might need to re-paste it if it gets clobbered. Assuming the tool is smart enough to insert *around* or *after* the target if the replacement is just adding new classes.
+# Better target: insert *before* the PUT route.
+# Let's try a more specific target for insertion for the new GET route.
+# Target: the line before '@app.put("/users/me/notification-preferences")'
+# However, the tool requires TargetContent. So, I'll target a known line and insert the new content relative to it.
+# The class NotificationPreferenceUpdate is a good anchor.
     serviceStatusChanges: Optional[bool] = None
     newIncidents: Optional[bool] = None
     incidentUpdates: Optional[bool] = None
     incidentResolved: Optional[bool] = None
+
+
+@app.get("/users/me/notification-preferences", response_model=NotificationPreferenceResponse)
+async def get_notification_preferences(
+    current_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
+):
+    user_from_db = await db.user.find_unique(
+        where={"clerk_user_id": current_user_payload.id},
+        include={"notificationPreferences": True}
+    )
+    
+    if not user_from_db:
+        raise HTTPException(status_code=404, detail="User not found in local database.")
+    
+    if not user_from_db.notificationPreferences:
+        # This implies that notification preferences were not created with the user or were deleted.
+        # Frontend has defaults, so a 404 is appropriate to let client use its defaults.
+        raise HTTPException(status_code=404, detail="Notification preferences not found for user.")
+
+    return NotificationPreferenceResponse(
+        serviceStatusChanges=user_from_db.notificationPreferences.serviceStatusChanges,
+        newIncidents=user_from_db.notificationPreferences.newIncidents,
+        incidentUpdates=user_from_db.notificationPreferences.incidentUpdates,
+        incidentResolved=user_from_db.notificationPreferences.incidentResolved,
+    )
+
+
+@app.put("/users/me/notification-preferences", response_model=NotificationPreferenceResponse)
+async def update_notification_preferences(
+    notification_preferences: NotificationPreferenceUpdate,
+    current_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
+):
+    user_from_db = await db.user.find_unique(
+        where={"clerk_user_id": current_user_payload.id},
+        include={"notificationPreferences": True}
+    )
+    
+    if not user_from_db:
+        raise HTTPException(status_code=404, detail="User not found in local database.")
+
+    # Convert to dict and exclude unset values
+    updated_data = notification_preferences.dict(exclude_unset=True)
+    
+    if not user_from_db.notificationPreferences:
+        # Create preferences if they don't exist
+        notification_preferences = await db.notificationPreference.create(
+            data={
+                "user": {
+                    "connect": {"id": user_from_db.id}
+                },
+                **updated_data
+            }
+        )
+    else:
+        # Update existing preferences
+        notification_preferences = await db.notificationPreference.update(
+            where={"id": user_from_db.notificationPreferences.id},
+            data=updated_data
+        )
+    
+    return NotificationPreferenceResponse(
+        serviceStatusChanges=notification_preferences.serviceStatusChanges,
+        newIncidents=notification_preferences.newIncidents,
+        incidentUpdates=notification_preferences.incidentUpdates,
+        incidentResolved=notification_preferences.incidentResolved,
+    )
+
 
 @app.post("/users/ensure-synced", response_model=SyncedUserResponse)
 async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]):
@@ -1253,115 +1373,6 @@ async def trigger_service_check(
     background_tasks.add_task(uptime_service.check_endpoint, service.endpoint)
     
     return {"message": "Check triggered"}
-
-# API Key Management
-@app.post("/api-keys")
-async def create_api_key(
-    api_key: ApiKeyCreate,
-    user: Annotated[Any, Depends(get_clerk_user)]
-):
-    """Create a new API key for the organization."""
-    # Get the user's organization
-    user_record = await db.user.find_first(
-        where={"email": user.email_addresses[0].email_address},
-        include={"organization": True}
-    )
-    
-    if not user_record or not user_record.organization:
-        raise HTTPException(status_code=404, detail="User or organization not found")
-    
-    # Generate a new API key
-    key = api_key_auth.generate_api_key()
-    
-    # Create the API key in the database
-    created_key = await db.apiKey.create(
-        data={
-            "name": api_key.name,
-            "key": key,
-            "organization": {
-                "connect": {"id": user_record.organization_id}
-            }
-        }
-    )
-    
-    # Return the key (this is the only time the full key will be shown)
-    return {
-        "id": created_key.id,
-        "name": created_key.name,
-        "key": key,
-        "createdAt": created_key.createdAt
-    }
-
-@app.get("/api-keys")
-async def list_api_keys(user: Annotated[Any, Depends(get_clerk_user)]):
-    """List all API keys for the organization."""
-    # Get the user's organization
-    user_record = await db.user.find_first(
-        where={"email": user.email_addresses[0].email_address},
-        include={"organization": True}
-    )
-    
-    if not user_record or not user_record.organization:
-        raise HTTPException(status_code=404, detail="User or organization not found")
-    
-    # Get all API keys for the organization
-    api_keys = await db.apiKey.find_many(
-        where={"organization_id": user_record.organization_id},
-        order_by={"createdAt": "desc"}
-    )
-    
-    # Don't return the actual key values
-    return [
-        {
-            "id": key.id,
-            "name": key.name,
-            "isActive": key.isActive,
-            "lastUsed": key.lastUsed,
-            "createdAt": key.createdAt
-        }
-        for key in api_keys
-    ]
-
-@app.delete("/api-keys/{key_id}")
-async def delete_api_key(key_id: str, user: Annotated[Any, Depends(get_clerk_user)]):
-    """Delete (deactivate) an API key."""
-    # Get the user's organization
-    user_record = await db.user.find_first(
-        where={"email": user.email_addresses[0].email_address},
-        include={"organization": True}
-    )
-    
-    if not user_record or not user_record.organization:
-        raise HTTPException(status_code=404, detail="User or organization not found")
-    
-    # Find the API key
-    api_key = await db.apiKey.find_first(
-        where={
-            "id": key_id,
-            "organization_id": user_record.organization_id
-        }
-    )
-    
-    if not api_key:
-        raise HTTPException(status_code=404, detail="API key not found")
-    
-    # Deactivate the key (we don't actually delete it)
-    await db.apiKey.update(
-        where={"id": key_id},
-        data={"isActive": False}
-    )
-    
-    return {"message": "API key deactivated"}
-
-# External API endpoints (accessible with API key)
-@app.get("/api/v1/status")
-async def get_status_summary(
-    api_key: Annotated[Any, Depends(api_key_auth.get_api_key)]
-):
-    """Get a summary of all services and their current status."""
-    services = await db.service.find_many(
-        where={"organization_id": api_key.organization_id},
-        order_by={"name": "asc"}
     )
     
     # Get active incidents
@@ -1403,13 +1414,10 @@ async def get_status_summary(
         ]
     }
 
-@app.get("/api/v1/services")
-async def get_services_api(
-    api_key: Annotated[Any, Depends(api_key_auth.get_api_key)]
-):
+@app.get("/services")
+async def get_services():
     """Get a list of all services and their current status."""
     services = await db.service.find_many(
-        where={"organization_id": api_key.organization_id},
         order_by={"name": "asc"}
     )
     
@@ -1422,16 +1430,13 @@ async def get_services_api(
         for service in services
     ]
 
-@app.get("/api/v1/incidents")
-async def get_incidents_api(
-    api_key: Annotated[Any, Depends(api_key_auth.get_api_key)],
+@app.get("/incidents")
+async def get_incidents(
     status: Optional[str] = None,
     limit: int = Query(10, ge=1, le=100)
 ):
     """Get a list of recent incidents."""
-    where = {
-        "organization_id": api_key.organization_id,
-    }
+    where = {}
     if status:
         where["status"] = status
     
