@@ -1373,7 +1373,6 @@ async def trigger_service_check(
     background_tasks.add_task(uptime_service.check_endpoint, service.endpoint)
     
     return {"message": "Check triggered"}
-    )
     
     # Get active incidents
     active_incidents = await db.incident.find_many(
@@ -1413,6 +1412,52 @@ async def trigger_service_check(
             for incident in active_incidents
         ]
     }
+
+@app.get("/services/{service_id}/metrics/uptime")
+async def get_service_uptime_metrics(
+    service_id: str,
+    period: str = Query("7d", regex="^(24h|7d|30d)$"),
+    user: Annotated[Any, Depends(get_clerk_user)]
+):
+    """
+    Get uptime metrics for a service
+    """
+    # Verify the service exists and the user has access
+    service = await db.service.find_unique(
+        where={"id": service_id},
+        include={"organization": True}
+    )
+    
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    
+    # Calculate time range based on period
+    now = datetime.utcnow()
+    if period == "24h":
+        start_time = now - timedelta(hours=24)
+    elif period == "7d":
+        start_time = now - timedelta(days=7)
+    else:  # 30d
+        start_time = now - timedelta(days=30)
+    
+    # Get uptime checks from the database
+    checks = await db.uptimecheck.find_many(
+        where={
+            "service_id": service_id,
+            "checked_at": {"gte": start_time}
+        },
+        order_by={"checked_at": "asc"}
+    )
+    
+    # Format the response
+    return [
+        {
+            "timestamp": check.checked_at.isoformat(),
+            "status": "up" if check.is_up else "down",
+            "response_time": check.response_time_ms
+        }
+        for check in checks
+    ]
 
 @app.get("/services")
 async def get_services():

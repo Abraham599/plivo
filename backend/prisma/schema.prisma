@@ -79,25 +79,31 @@ model NotificationPreference {
   updatedAt         DateTime  @updatedAt
 }
 
-// Models for uptime tracking
 model UptimeCheck {
-  id          String    @id @default(uuid())
-  service     Service   @relation(fields: [service_id], references: [id])
-  service_id  String
-  status      String    // up, down
-  responseTime Int?     // in milliseconds
-  timestamp   DateTime  @default(now())
+  id              String   @id @default(uuid())
+  service_id      String
+  service         Service  @relation(fields: [service_id], references: [id])
+  is_up           Boolean
+  response_time_ms Int
+  checked_at      DateTime @default(now())
+  error_message   String?
+  
+  @@index([service_id])
+  @@index([checked_at])
 }
 
 model UptimeMetric {
-  id          String    @id @default(uuid())
-  service     Service   @relation(fields: [service_id], references: [id])
-  service_id  String
-  period      String    // daily, weekly, monthly
-  startDate   DateTime
-  endDate     DateTime
-  uptime      Float     // percentage (0-100)
-  avgResponseTime Int?  // average response time in milliseconds
-  checksCount Int       // number of checks in this period
-  downtimeMinutes Int   // minutes of downtime in this period
+  id              String    @id @default(uuid())
+  service        Service   @relation(fields: [service_id], references: [id])
+  service_id     String
+  period         String    // daily, weekly, monthly
+  startDate      DateTime
+  endDate        DateTime
+  uptime         Float     // percentage (0-100)
+  avgResponseTime Int?     // average response time in milliseconds
+  checksCount    Int       // number of checks in this period
+  downtimeMinutes Int      // minutes of downtime in this period
+  
+  @@index([service_id])
+  @@index([startDate, endDate])
 }

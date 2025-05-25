@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical, Edit, Trash, BarChart2 } from "lucide-react";
 import { toast } from "sonner";
-import { UptimeMetricsChart } from "@/components/UptimeMetricsChart";
+import { UptimeMetrics } from "@/components/UptimeMetrics";
 
 // Helper to format status display names
 const formatStatusDisplayName = (status: ServiceStatus): string => {
@@ -57,10 +57,9 @@ export default function ServicesPage() {
   // This default will be overwritten when a service is selected for editing.
   const [editServiceStatus, setEditServiceStatus] = useState<ServiceStatus>("operational");
   const [editServiceEndpoint, setEditServiceEndpoint] = useState("");
-
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
-  // Strongly type selectedServiceForMetrics
-  const [selectedServiceForMetrics, setSelectedServiceForMetrics] = useState<Service | null>(null);
+  const [metricsServiceId, setMetricsServiceId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadServices = async () => {
@@ -162,7 +161,8 @@ export default function ServicesPage() {
 
   // Use Service type for the service parameter
   const handleViewMetrics = (service: Service) => {
-    setSelectedServiceForMetrics(service);
+    setSelectedService(service);
+    setMetricsServiceId(service.id);
     setIsMetricsDialogOpen(true);
   };
 
@@ -394,14 +394,15 @@ export default function ServicesPage() {
       <Dialog open={isMetricsDialogOpen} onOpenChange={setIsMetricsDialogOpen}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Uptime Metrics</DialogTitle>
+            <DialogTitle>Service Metrics: {selectedService?.name}</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            {selectedServiceForMetrics && (
-              <UptimeMetricsChart
-                serviceId={selectedServiceForMetrics.id}
-                serviceName={selectedServiceForMetrics.name}
-              />
+          <div className="max-h-[80vh] overflow-y-auto">
+            {metricsServiceId ? (
+              <UptimeMetrics serviceId={metricsServiceId} />
+            ) : (
+              <div className="flex items-center justify-center h-64 text-gray-500">
+                Loading metrics...
+              </div>
             )}
           </div>
         </DialogContent>
