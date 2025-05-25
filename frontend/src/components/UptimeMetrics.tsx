@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { getApiUrl, getToken } from '../lib/api';
+import { getApiUrl, getAuthHeaders } from '../lib/api';
 
 interface UptimeData {
   timestamp: string;
@@ -13,18 +14,16 @@ export function UptimeMetrics({ serviceId }: { serviceId: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const { getToken } = useAuth();
+
   useEffect(() => {
     const fetchUptimeData = async () => {
       try {
         const token = await getToken();
+        const headers = getAuthHeaders(token);
         const response = await fetch(
           `${getApiUrl()}/services/${serviceId}/metrics/uptime?period=7d`,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            }
-          }
+          { headers }
         );
 
         if (!response.ok) {
@@ -42,7 +41,7 @@ export function UptimeMetrics({ serviceId }: { serviceId: string }) {
     };
 
     fetchUptimeData();
-  }, [serviceId]);
+  }, [serviceId, getToken]);
 
   // Calculate uptime percentage
   const uptimePercentage = uptimeData.length > 0

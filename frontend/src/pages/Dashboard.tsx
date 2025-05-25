@@ -3,17 +3,16 @@
 import { useEffect, useState } from "react"
 import type { Service, ServiceStatus } from "../stores/serviceStore"
 import type { Incident } from "../stores/incidentStore"
+import { getAuthHeaders, getApiUrl } from "../lib/api"
 import type { IncidentStatus } from "../lib/format"
 import type { Organization } from "../api/userApi"
 import { useAuth } from "@clerk/clerk-react"
 import { format } from "date-fns"
-import { getApiUrl } from "../lib/api"
 import { formatServiceStatusDisplayName, formatIncidentStatusDisplayName } from "../lib/format"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Link } from "react-router-dom"
 import { ServiceUptimeCard } from "../components/ServiceUptimeCard"
 import { Button } from "@/components/ui/button"
 import { MoreVertical, ArrowUpDown, Clock, AlertCircle, MessageSquare, Check, Pencil, Bell, Loader2 } from "lucide-react";
@@ -34,13 +33,9 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const { getToken } = useAuth();
 
-  const fetchData = async (organizationId?: string | null): Promise<void> => {
+  const fetchData = async (organizationId?: string | null, token?: string | null): Promise<void> => {
     try {
-      const token = await getToken();
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-      };
+      const headers = getAuthHeaders(token);
       
       // Fetch services
       const servicesResponse = await fetch(
@@ -154,11 +149,15 @@ export default function Dashboard() {
     if (!authIsLoaded) return;
 
     const loadData = async () => {
-      await fetchData(selectedOrganization?.id);
+      try {
+        const token = await getToken();
+        await fetchData(selectedOrganization?.id, token);
+      } catch (error) {
+        console.error('Error loading data:', error);
+      }
     };
-
     loadData();
-  }, [authIsLoaded, selectedOrganization?.id]);
+  }, [selectedOrganization?.id, getToken]);
 
   // Data loading effect only - no auto-refresh
 

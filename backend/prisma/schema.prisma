@@ -83,13 +83,12 @@ model UptimeCheck {
   id              String   @id @default(uuid())
   service_id      String
   service         Service  @relation(fields: [service_id], references: [id])
-  is_up           Boolean
-  response_time_ms Int
-  checked_at      DateTime @default(now())
-  error_message   String?
+  status          String   @default("down")  // 'up' or 'down'
+  responseTime    Int?     // Response time in milliseconds
+  timestamp       DateTime @default(now())
   
   @@index([service_id])
-  @@index([checked_at])
+  @@index([timestamp])
 }
 
 model UptimeMetric {

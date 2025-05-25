@@ -1001,21 +1001,70 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
     # User not found, create them
     local_org_id_to_link = None
 
+    async def create_personal_organization(user_id: str, user_name: str, user_email: str):
+        """Helper function to create a personal organization for a user"""
+        org_name = f"{user_name}'s Workspace" if user_name else f"{user_email.split('@')[0]}'s Workspace"
+        personal_org_id = f"personal_{user_id}"
+        
+        # Check if personal organization already exists
+        existing_org = await db.organization.find_unique(
+            where={"clerk_org_id": personal_org_id}
+        )
+        
+        if existing_org:
+            return existing_org.id
+            
+        try:
+            # Try to create organization in Clerk first
+            clerk_org = await clerk_service.create_organization(name=org_name)
+            clerk_org_id = clerk_org.id
+            
+            # Add user to the organization as admin
+            try:
+                await clerk_service.add_user_to_organization(
+                    user_id=user_id,
+                    organization_id=clerk_org_id,
+                    role="org:admin"
+                )
+            except Exception as add_error:
+                logger.error(f"Error adding user to organization: {add_error}")
+            
+            # Create organization in database with the Clerk organization ID
+            new_org = await db.organization.create(
+                data={"name": org_name, "clerk_org_id": clerk_org_id}
+            )
+            return new_org.id
+            
+        except Exception as e:
+            logger.error(f"Error creating personal organization in Clerk: {e}")
+            # Fallback to local-only organization
+            try:
+                new_org = await db.organization.create(
+                    data={"name": org_name, "clerk_org_id": personal_org_id}
+                )
+                logger.info(f"Created local-only organization for user {user_id}")
+                return new_org.id
+            except Exception as db_error:
+                logger.error(f"Failed to create organization in database: {db_error}")
+                return None
+
     # Fetch organization memberships from Clerk
     try:
         # Get all organization memberships for this user
-        org_memberships = await clerk_service.get_user_organizations(user_id=clerk_id)
+        org_memberships = []
+        try:
+            org_memberships = await clerk_service.get_user_organizations(user_id=clerk_id)
+        except Exception as e:
+            logger.warning(f"Error fetching organizations for user {clerk_id}: {str(e)}")
+            org_memberships = []
 
-        # Check if org_memberships is a non-empty list
+        # If user has organization memberships, use the first one
         if org_memberships and isinstance(org_memberships, list) and org_memberships:
-            # For simplicity, using the first active organization.
             active_org_membership = org_memberships[0]
-            
-            # Initialize variables
             clerk_org_details = None
             clerk_org_id_from_member = None
             
-            # Check if the membership has the organization property
+            # Extract organization ID from membership
             if hasattr(active_org_membership, 'organization'):
                 clerk_org_details = active_org_membership.organization
                 if hasattr(clerk_org_details, 'id'):
@@ -1024,170 +1073,32 @@ async def ensure_user_synced(clerk_user_payload: Annotated[ClerkUser, Depends(ge
                 clerk_org_details = active_org_membership['organization']
                 if hasattr(clerk_org_details, 'id'):
                     clerk_org_id_from_member = clerk_org_details.id
-                    
-            # If we couldn't get the organization ID, skip this section
-            if not clerk_org_id_from_member:
-                logger.warning(f"Could not get organization ID from membership for user {clerk_id}")
-                clerk_org_details = None
             
-            # Only proceed if we have organization details
-            if clerk_org_details and clerk_org_id_from_member:
-                # Use Clerk org name, or generate one if blank
-                org_name_from_clerk = getattr(clerk_org_details, 'name', None)
-                if not org_name_from_clerk:
-                    org_name_from_clerk = f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
-
-                # Check if organization exists in database
-                local_org = await db.organization.find_unique(where={"clerk_org_id": clerk_org_id_from_member})
+            if clerk_org_id_from_member:
+                # Get or create the organization in our database
+                org_name = getattr(clerk_org_details, 'name', None) or f"{name}'s Organization" if name else f"{email.split('@')[0]}'s Organization"
+                
+                local_org = await db.organization.find_unique(
+                    where={"clerk_org_id": clerk_org_id_from_member}
+                )
                 
                 if local_org:
                     local_org_id_to_link = local_org.id
                 else:
-                    # Create organization in database
+                    # Create organization in our database
                     local_org = await db.organization.create(
-                        data={"name": org_name_from_clerk, "clerk_org_id": clerk_org_id_from_member}
+                        data={"name": org_name, "clerk_org_id": clerk_org_id_from_member}
                     )
                     local_org_id_to_link = local_org.id
-            else:
-                # No organization details, create a personal one
-                personal_clerk_org_id = f"personal_user_{clerk_id}" 
-                personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
-                
-                # Check if personal organization exists
-                try:
-                    existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
-                    if existing_personal_org:
-                        local_org_id_to_link = existing_personal_org.id
-                    else:
-                        # Create personal organization in Clerk
-                        try:
-                            # Create organization with the correct parameters
-                            organization_data = {"name": personal_org_name}
-                            clerk_org = await clerk_service.create_organization(name=personal_org_name)
-                            
-                            # Log the created organization ID for debugging
-                            logger.info(f"Created organization in Clerk with ID: {clerk_org.id}")
-                            
-                            # Store the clerk_org_id before trying to add the user
-                            clerk_org_id = clerk_org.id
-                            
-                            try:
-                                # Add the user to the organization as admin
-                                await clerk_service.add_user_to_organization(
-                                    user_id=clerk_id,
-                                    organization_id=clerk_org_id,
-                                    role="org:admin"
-                                )
-                            except Exception as add_error:
-                                # Log the error but continue with creating the organization in the database
-                                logger.error(f"Error adding user to organization: {add_error}")
-                                # We'll still create the organization in the database with the Clerk ID
-                            
-                            # Create organization in database with the Clerk organization ID
-                            new_personal_org = await db.organization.create(
-                                data={"name": personal_org_name, "clerk_org_id": clerk_org_id}
-                            )
-                            local_org_id_to_link = new_personal_org.id
-                        except Exception as e:
-                            logger.error(f"Error creating personal organization in Clerk: {e}")
-                            new_personal_org = await db.organization.create(
-                                data={"name": personal_org_name, "clerk_org_id": f"personal_user_{clerk_id}"}
-                            )
-                            local_org_id_to_link = new_personal_org.id
-                            logger.info(f"Created local-only organization for user {clerk_id}")
-                except Exception as db_error:
-                    logger.error(f"Failed to create organization in database: {db_error}")
-                    # We'll create the user without an organization link
-                    local_org_id_to_link = None
-        else:
-            # No Clerk organization, create a personal one
-            personal_clerk_org_id = f"personal_user_{clerk_id}" 
-            personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
             
-            # Check if personal organization exists
-            try:
-                existing_personal_org = await db.organization.find_unique(where={"clerk_org_id": personal_clerk_org_id})
-                if existing_personal_org:
-                    local_org_id_to_link = existing_personal_org.id
-                else:
-                    # Create personal organization in Clerk
-                    try:
-                        # Create organization with the correct parameters
-                        organization_data = {"name": personal_org_name}
-                        clerk_org = await clerk_service.create_organization(name=personal_org_name)
-                        
-                        # Log the created organization ID for debugging
-                        logger.info(f"Created organization in Clerk with ID: {clerk_org.id}")
-                        
-                        # Store the clerk_org_id before trying to add the user
-                        clerk_org_id = clerk_org.id
-                        
-                        try:
-                            # Add the user to the organization as admin
-                            await clerk_service.add_user_to_organization(
-                                user_id=clerk_id,
-                                organization_id=clerk_org_id,
-                                role="org:admin"
-                            )
-                        except Exception as add_error:
-                            # Log the error but continue with creating the organization in the database
-                            logger.error(f"Error adding user to organization: {add_error}")
-                            # We'll still create the organization in the database with the Clerk ID
-                        
-                        # Create organization in database with the Clerk organization ID
-                        new_personal_org = await db.organization.create(
-                            data={"name": personal_org_name, "clerk_org_id": clerk_org_id}
-                        )
-                        local_org_id_to_link = new_personal_org.id
-                    except Exception as e:
-                        logger.error(f"Error creating personal organization in Clerk: {e}")
-                        new_personal_org = await db.organization.create(
-                            data={"name": personal_org_name, "clerk_org_id": f"personal_user_{clerk_id}"}
-                        )
-                        local_org_id_to_link = new_personal_org.id
-                        logger.info(f"Created local-only organization for user {clerk_id}")
-            except Exception as db_error:
-                logger.error(f"Failed to create organization in database: {db_error}")
-                # We'll create the user without an organization link
-                local_org_id_to_link = None
+        # If we still don't have an organization, create a personal one
+        if not local_org_id_to_link:
+            local_org_id_to_link = await create_personal_organization(clerk_id, name, email)
+            
     except Exception as e:
-        logger.error(f"Error fetching organization memberships for user {clerk_id}: {e}")
-        # If we can't fetch orgs, create a local-only organization
-        try:
-            personal_org_name = f"{name}'s Personal Workspace" if name else f"{email.split('@')[0]}'s Personal Workspace"
-            
-            # First try to create the organization in Clerk
-            try:
-                # Create organization with the correct parameters and method
-                organization_data = {"name": personal_org_name}
-                clerk_org = await clerk_service.create_organization(name=personal_org_name)
-                clerk_org_id = clerk_org.id
-                
-                # Add the user to the organization
-                await clerk_service.add_user_to_organization(
-                    user_id=clerk_id,
-                    organization_id=clerk_org_id,
-                    role="admin"
-                )
-                
-                # Create the organization in the database
-                new_personal_org = await db.organization.create(
-                    data={"name": personal_org_name, "clerk_org_id": clerk_org_id}
-                )
-                local_org_id_to_link = new_personal_org.id
-                logger.info(f"Created new organization in Clerk and database for user {clerk_id}")
-            except Exception as clerk_error:
-                logger.error(f"Failed to create organization in Clerk: {clerk_error}")
-                # Fallback to local-only organization
-                new_personal_org = await db.organization.create(
-                    data={"name": personal_org_name, "clerk_org_id": f"personal_user_{clerk_id}"}
-                )
-                local_org_id_to_link = new_personal_org.id
-                logger.info(f"Created local-only organization for user {clerk_id}")
-        except Exception as db_error:
-            logger.error(f"Failed to create organization in database: {db_error}")
-            # We'll create the user without an organization link
-            local_org_id_to_link = None
+        logger.error(f"Error processing organization memberships for user {clerk_id}: {e}")
+        # Create a personal organization as fallback
+        local_org_id_to_link = await create_personal_organization(clerk_id, name, email)
 
     if not local_org_id_to_link:
         raise HTTPException(status_code=500, detail="Failed to determine or create organization for the user.")

@@ -39,11 +39,12 @@ class UptimeService:
                 status, response_time = await self.check_endpoint(service.endpoint)
                 
                 # Record the check
-                await self.db.uptimeCheck.create(
+                await self.db.uptimecheck.create(
                     data={
                         "service": {"connect": {"id": service.id}},
                         "status": "up" if status else "down",
-                        "responseTime": response_time
+                        "responseTime": response_time,
+                        "timestamp": datetime.datetime.now()
                     }
                 )
                 
@@ -113,7 +114,7 @@ class UptimeService:
         
         for service in services:
             # Get all checks for this service in the period
-            checks = await self.db.uptimeCheck.find_many(
+            checks = await self.db.uptimecheck.find_many(
                 where={
                     "service_id": service.id,
                     "timestamp": {
