@@ -24,8 +24,7 @@ const formatIncidentStatusDisplayName = (status: IncidentStatus): string => {
     case "monitoring": return "Monitoring";
     case "resolved": return "Resolved";
     default:
-      const exhaustiveCheck: never = status;
-      return exhaustiveCheck;
+      return status;
   }
 };
 
@@ -50,7 +49,11 @@ export default function IncidentsPage() {
     if (authIsLoaded && getToken) {
       fetchIncidents(getToken);
     }
-    fetchServiceStoreServices();
+    if (authIsLoaded) {
+      getToken().then(token => {
+        if (token) fetchServiceStoreServices(token);
+      });
+    }
   }, [fetchIncidents, fetchServiceStoreServices, getToken, authIsLoaded]);
 
   const handleCreateIncident = async () => {
@@ -126,8 +129,7 @@ export default function IncidentsPage() {
       case "monitoring": return "bg-blue-500";
       case "resolved": return "bg-green-500";
       default:
-        const exhaustiveCheck: never = status;
-        return exhaustiveCheck;
+        return status;
     }
   }
 

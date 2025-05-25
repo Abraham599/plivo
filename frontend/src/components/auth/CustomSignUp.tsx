@@ -28,13 +28,26 @@ const CustomSignUp = () => {
     setError('');
 
     try {
-      // Create the sign-up
+      // Create the sign-up with only email and password
+      // When verification is enabled, first_name and last_name are not valid parameters
       const signUpAttempt = await signUp.create({
         emailAddress: email,
         password,
-        firstName,
-        lastName,
       });
+
+      // Store first and last name to be set after verification
+      if (firstName || lastName) {
+        try {
+          // Update the sign-up with first and last name
+          await signUp.update({
+            firstName,
+            lastName,
+          });
+        } catch (nameError) {
+          console.error("Error setting name:", nameError);
+          // Continue with verification even if name setting fails
+        }
+      }
 
       // Check if verification is required
       if (signUpAttempt.status === 'complete') {
@@ -46,34 +59,14 @@ const CustomSignUp = () => {
           await syncUserWithBackend();
           navigate('/dashboard');
         }
+      } else if (signUpAttempt.status === 'missing_requirements' && 
+                signUpAttempt.unverifiedFields.includes('email_address')) {
+        // Email verification is required
+        // Prepare for email verification
+        await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
+        setPendingVerification(true);
       } else {
-        // If verification is still required by Clerk settings, we'll skip it in our UI
-        // This requires you to also disable verification in Clerk Dashboard
-        
-        // Try to complete sign-up without verification
-        try {
-          // This is a workaround - in production, you should properly disable verification in Clerk Dashboard
-          const completeSignUp = await signUp.attemptEmailAddressVerification({
-            code: '000000' // This will only work if verification is disabled in Clerk Dashboard
-          });
-          
-          if (completeSignUp.status === 'complete' && completeSignUp.createdSessionId) {
-            await setActive({ session: completeSignUp.createdSessionId });
-            
-            // Sync with backend
-            await syncUserWithBackend();
-            navigate('/dashboard');
-          } else {
-            // If auto-verification didn't work, we'll just proceed without verification
-            // In a real app, you should handle this case properly
-            console.log('Skipping verification - please disable verification in Clerk Dashboard');
-            navigate('/dashboard');
-          }
-        } catch (verificationError) {
-          console.error('Error during verification skip:', verificationError);
-          // Just proceed to dashboard anyway
-          navigate('/dashboard');
-        }
+        console.log('Unexpected sign-up status:', signUpAttempt.status);
       }
     } catch (err: any) {
       if (err.errors && Array.isArray(err.errors) && err.errors[0]?.message) {
@@ -189,8 +182,8 @@ const CustomSignUp = () => {
       }
   };
 
-  // We're no longer using the verification UI since we're skipping verification
-  if (false && pendingVerification) { // Always skip this condition
+  // Show verification UI when verification is pending
+  if (pendingVerification) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full space-y-8">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useUser, useAuth } from "@clerk/clerk-react";
 import { useServiceStore, type Service, type ServiceStatus } from "../stores/serviceStore";
+import { useOrganizationStore } from "../stores/organizationStore"; // Added import
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -36,6 +37,8 @@ const formatStatusDisplayName = (status: ServiceStatus): string => {
 export default function ServicesPage() {
   const { user } = useUser();
   const { services, isLoading, error, fetchServices, createService, updateService, deleteService } = useServiceStore();
+  const { getToken } = useAuth();
+  const { currentOrganization } = useOrganizationStore(); // Added to get current organization
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -60,8 +63,26 @@ export default function ServicesPage() {
   const [selectedServiceForMetrics, setSelectedServiceForMetrics] = useState<Service | null>(null);
 
   useEffect(() => {
-    fetchServices();
-  }, [fetchServices]);
+    const loadServices = async () => {
+      try {
+        const token = await getToken();
+        const orgId = currentOrganization?.id;
+
+        if (token && orgId) { // Check for both token and orgId
+          fetchServices(token); // Pass the token to fetchServices
+        } else {
+          // Handle cases where token might be null (e.g., user not fully authenticated yet)
+          // serviceStore's fetchServices also checks for token and orgId, so this is an additional safeguard.
+          console.warn("ServicesPage: Authentication token or Organization ID not yet available.", { hasToken: !!token, hasOrgId: !!orgId });
+        }
+      } catch (error) {
+        console.error("ServicesPage: Error fetching token or services:", error);
+        // Optionally, set an error state here to inform the user
+      }
+    };
+
+    loadServices();
+  }, [fetchServices, getToken, currentOrganization?.id]); // Added currentOrganization?.id to dependency array
 
   const handleCreateService = async () => {
     if (!newServiceName.trim()) {

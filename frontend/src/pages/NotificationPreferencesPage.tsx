@@ -9,24 +9,8 @@ import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 
-interface NotificationPreferences {
-  id: string
-  serviceStatusChanges: boolean
-  newIncidents: boolean
-  incidentUpdates: boolean
-  incidentResolved: boolean
-}
-
-interface User {
-  id: string
-  email: string
-  name: string | null
-  notificationPreferences: NotificationPreferences | null
-}
-
 export default function NotificationPreferencesPage() {
   const { getToken } = useAuth()
-  const [_user, setUser] = useState<User | null>(null) // User data stored but not directly referenced
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [preferences, setPreferences] = useState({
@@ -37,42 +21,39 @@ export default function NotificationPreferencesPage() {
   })
 
   useEffect(() => {
-    const fetchUser = async () => {
+    const fetchPreferences = async () => {
       try {
         const token = await getToken()
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/users/me`, {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/users/me/notification-preferences`, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
         })
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch user data")
-        }
-
-        const userData = await response.json()
-        setUser(userData)
-
-        if (userData.notificationPreferences) {
+        if (response.ok) {
+          const prefsData = await response.json()
           setPreferences({
-            serviceStatusChanges: userData.notificationPreferences.serviceStatusChanges,
-            newIncidents: userData.notificationPreferences.newIncidents,
-            incidentUpdates: userData.notificationPreferences.incidentUpdates,
-            incidentResolved: userData.notificationPreferences.incidentResolved,
+            serviceStatusChanges: prefsData.serviceStatusChanges,
+            newIncidents: prefsData.newIncidents,
+            incidentUpdates: prefsData.incidentUpdates,
+            incidentResolved: prefsData.incidentResolved,
           })
+        } else if (response.status !== 404) {
+          // 404 is expected for new users, use defaults
+          throw new Error("Failed to fetch notification preferences")
         }
       } catch (error) {
-        console.error("Error fetching user:", error)
+        console.error("Error fetching preferences:", error)
         toast("Failed to load notification preferences",{
-          description: "Please try again",
+          description: "Using default preferences",
         })
       } finally {
         setIsLoading(false)
       }
     }
 
-    fetchUser()
-  }, [getToken, toast])
+    fetchPreferences()
+  }, [getToken])
 
   const handleSavePreferences = async () => {
     setIsSaving(true)

@@ -1,9 +1,8 @@
 "use client"
 
 import { create } from "zustand"
-import { useOrganizationStore } from "@/stores/organizationStore"
 
-export type IncidentStatus = "investigating" | "identified" | "monitoring" | "resolved";
+export type IncidentStatus = "investigating" | "identified" | "monitoring" | "resolved" | "scheduled";
 
 export interface Update {
   id: string
@@ -22,6 +21,7 @@ export interface Incident {
   organization_id: string
   createdAt: string
   updatedAt: string
+  scheduledFor?: string  // Optional scheduled date for future incidents
 }
 
 // Define the GetToken type to match Clerk's getToken function
@@ -58,51 +58,98 @@ export const useIncidentStore = create<IncidentState>((set) => ({
   error: null,
 
   fetchIncidents: async (getToken, status?: IncidentStatus) => {
-    const { currentOrganization } = useOrganizationStore.getState();
-
-    if (!currentOrganization) {
-      set({ error: "No organization selected", isLoading: false });
-      return;
-    }
+    console.log('[IncidentStore] fetchIncidents: Starting fetch');
     set({ isLoading: true, error: null });
     try {
+      console.log('[IncidentStore] fetchIncidents: Getting token');
       const token = await getToken();
+      console.log('[IncidentStore] fetchIncidents: Token received:', !!token);
       if (!token) {
         throw new Error("Authentication token not available. Please sign in.");
       }
-      let url = `${API_URL}/incidents?organization_id=${currentOrganization.id}`;
+
+      // Get the current organization from the sync response
+      const syncResponse = await fetch(`${API_URL}/users/ensure-synced`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+      
+      if (!syncResponse.ok) {
+        throw new Error('Failed to sync user');
+      }
+      const syncData = await syncResponse.json();
+
+      let url = `${API_URL}/incidents?organization_id=${syncData.organization_id}`;
       if (status) {
         url += `&status=${status}`;
       }
+      console.log('[IncidentStore] fetchIncidents: Fetching from URL:', url);
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      console.log('[IncidentStore] fetchIncidents: Response status:', response.status);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: "Failed to fetch incidents" }));
+        console.error('[IncidentStore] fetchIncidents: API response error:', { status: response.status, errorData });
         throw new Error(errorData.message || "Failed to fetch incidents");
       }
       const data = await response.json();
-      set({ incidents: data, isLoading: false });
+      console.log('[IncidentStore] fetchIncidents: Data received:', data);
+      
+      // If backend returns null/undefined, use an empty array to prevent errors
+      const safeData = Array.isArray(data) ? data : [];
+      console.log('[IncidentStore] fetchIncidents: Safe data (after null check):', safeData);
+      
+      set({ incidents: safeData, isLoading: false });
+      console.log('[IncidentStore] fetchIncidents: Store updated with incidents count:', safeData.length);
     } catch (error) {
-      set({ error: (error as Error).message, isLoading: false });
-      // throw error; // Optionally re-throw
+      console.error('[IncidentStore] fetchIncidents: Error caught:', error);
+      // Set empty incidents array to prevent UI from waiting forever
+      set({ 
+        error: (error as Error).message, 
+        isLoading: false,
+        incidents: []
+      });
+      // Don't re-throw - let the UI continue with empty state
     }
+    console.log('[IncidentStore] fetchIncidents: Fetch completed');
   },
 
   createIncident: async (getToken, title, description, status, service_ids) => {
-    const { currentOrganization } = useOrganizationStore.getState();
-    if (!currentOrganization) {
-      set({ error: "No organization selected", isLoading: false });
-      throw new Error("No organization selected");
-    }
     set({ isLoading: true, error: null });
     try {
       const token = await getToken();
       if (!token) throw new Error("Authentication token not available. Please sign in.");
+
+      // Get the current organization from the sync response
+      const syncResponse = await fetch(`${API_URL}/users/ensure-synced`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+      
+      if (!syncResponse.ok) {
+        throw new Error('Failed to sync user');
+      }
+      const syncData = await syncResponse.json();
       const response = await fetch(`${API_URL}/incidents`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title, description, status, service_ids, organization_id: currentOrganization.id }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title,
+          description,
+          status,
+          service_ids,
+          organization_id: syncData.organization_id,
+        }),
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: "Failed to create incident" }));

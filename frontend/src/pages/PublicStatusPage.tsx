@@ -43,7 +43,7 @@ interface UptimeMetric {
 
 // Get API URL with fallback
 const getApiUrl = () => {
-  return import.meta.env.VITE_API_URL || "/api"
+  return import.meta.env.VITE_API_URL || "http://localhost:8000"
 }
 
 // Get WebSocket URL with fallback
@@ -62,13 +62,16 @@ export default function PublicStatusPage() {
   const websocketRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
-    const apiUrl = getApiUrl()
     const wsUrl = getWsUrl()
 
     const fetchData = async () => {
       try {
         // Fetch services
-        const servicesResponse = await fetch(`${apiUrl}/services`)
+        const servicesResponse = await fetch(`${getApiUrl()}/services`, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
         if (!servicesResponse.ok) {
           throw new Error("Failed to fetch services")
         }
@@ -76,7 +79,11 @@ export default function PublicStatusPage() {
         setServices(servicesData)
 
         // Fetch incidents
-        const incidentsResponse = await fetch(`${apiUrl}/incidents`)
+        const incidentsResponse = await fetch(`${getApiUrl()}/incidents`, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
         if (!incidentsResponse.ok) {
           throw new Error("Failed to fetch incidents")
         }
@@ -88,7 +95,11 @@ export default function PublicStatusPage() {
           .filter((service: Service) => service.endpoint)
           .map(async (service: Service) => {
             try {
-              const metricsResponse = await fetch(`${apiUrl}/services/${service.id}/uptime?period=daily&days=30`)
+              const metricsResponse = await fetch(`${getApiUrl()}/services/${service.id}/uptime?period=daily&days=30`, {
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+              })
               if (metricsResponse.ok) {
                 const metricsData = await metricsResponse.json()
                 return { serviceId: service.id, metrics: metricsData }

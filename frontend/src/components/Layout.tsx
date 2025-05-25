@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom"
 import { UserButton, OrganizationSwitcher } from "@clerk/clerk-react"
 import { Button } from "./ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu"
-import { Menu, Home, Server, AlertTriangle, Key, Bell } from "lucide-react"
+import { Menu, Home, Server, AlertTriangle, Bell } from "lucide-react"
 import {Toaster } from "@/components/ui/sonner"
 
 interface LayoutProps {
@@ -18,7 +18,6 @@ export default function Layout({ children }: LayoutProps) {
     { name: "Services", href: "/services", icon: Server },
     { name: "Incidents", href: "/incidents", icon: AlertTriangle },
     { name: "Notifications", href: "/notification-preferences", icon: Bell },
-    { name: "API Keys", href: "/api-keys", icon: Key },
   ]
 
   return (

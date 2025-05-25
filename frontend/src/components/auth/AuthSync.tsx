@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth, useUser } from '@clerk/clerk-react';
+import { useOrganizationStore } from '../../stores/organizationStore';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
 const AuthSyncer: React.FC = () => {
   const { isSignedIn, getToken, isLoaded: isAuthLoaded } = useAuth();
   const { user, isLoaded: isUserLoaded } = useUser();
+  const { fetchOrganizations } = useOrganizationStore();
   // Use a ref or state to track if sync has been attempted for the current user session
   const [hasSyncedForCurrentUser, setHasSyncedForCurrentUser] = useState(false);
 
@@ -31,6 +33,15 @@ const AuthSyncer: React.FC = () => {
           if (response.ok) {
             console.log("AuthSyncer: User synced successfully with backend.");
             setHasSyncedForCurrentUser(true); // Mark as synced
+            
+            // After successful sync, immediately fetch organizations
+            try {
+              console.log("AuthSyncer: Fetching organizations after successful sync");
+              await fetchOrganizations(token);
+              console.log("AuthSyncer: Organizations loaded successfully");
+            } catch (orgError) {
+              console.error("AuthSyncer: Failed to load organizations after sync:", orgError);
+            }
           } else {
             const errorData = await response.json().catch(() => ({ detail: "AuthSyncer: Failed to parse error from sync endpoint." }));
             console.error('AuthSyncer: Failed to sync user with backend:', response.status, errorData.detail);
