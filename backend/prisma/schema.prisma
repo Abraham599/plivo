@@ -14,7 +14,6 @@ model Organization {
   services    Service[]
   incidents   Incident[]
   users       User[]
-  apiKeys     ApiKey[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 }
@@ -101,17 +100,4 @@ model UptimeMetric {
   avgResponseTime Int?  // average response time in milliseconds
   checksCount Int       // number of checks in this period
   downtimeMinutes Int   // minutes of downtime in this period
-}
-
-// New model for API keys
-model ApiKey {
-  id              String    @id @default(uuid())
-  name            String    // A friendly name for the API key
-  key             String    @unique // The actual API key
-  organization    Organization @relation(fields: [organization_id], references: [id])
-  organization_id String
-  isActive        Boolean   @default(true)
-  lastUsed        DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
 }
