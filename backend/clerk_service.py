@@ -109,7 +109,7 @@ class ClerkService:
         try:
             # Get user's organization memberships
             memberships = self.clerk.users.get_organization_memberships(user_id=user_id)
-            
+            print(memberships)
             # Create a list of membership objects with organization details
             result = []
             
