@@ -3,6 +3,7 @@ from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Annotated
+from pydantic import BaseModel, validator
 import asyncio
 import json
 from datetime import datetime, timedelta
