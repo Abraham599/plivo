@@ -30,7 +30,8 @@ export default function Dashboard() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
-  const [isPageLoading, setIsPageLoading] = useState(true); // Start with true
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
 
   // Consolidated useEffect for data loading
   useEffect(() => {
@@ -78,28 +79,38 @@ export default function Dashboard() {
       const incidentsData = await incidentsResponse.json();
       setIncidents(incidentsData);
 
-      // Fetch organizations
+      // Fetch organizations with cache-busting
       const orgsResponse = await fetch(
-        `${getApiUrl()}/organizations`,
-        { headers }
+        `${getApiUrl()}/organizations?t=${new Date().getTime()}`,
+        { 
+          headers,
+          cache: 'no-store' // Prevent caching
+        }
       );
+      
       if (!orgsResponse.ok) {
         const errorBody = await orgsResponse.text();
         console.error("Failed to fetch organizations. Status:", orgsResponse.status, "Body:", errorBody);
         throw new Error(`Failed to fetch organizations (status ${orgsResponse.status})`);
       }
+      
       const orgsData = await orgsResponse.json();
       console.log("Fetched organizations data:", orgsData);
-      setOrganizations(orgsData);
       
-      if (orgsData && orgsData.length > 0) {
-        // Only update selected organization if we don't have one or if the current one is invalid
-        if (!selectedOrganization || !orgsData.some((org: any) => org.id === selectedOrganization?.id)) {
-          setSelectedOrganization(orgsData[0]);
+      // Ensure we have valid organization data
+      const validOrgs = Array.isArray(orgsData) ? orgsData : [];
+      setOrganizations(validOrgs);
+      
+      // Only update selected organization on initial load or if current selection is invalid
+      if (isInitialLoad || !selectedOrganization || !validOrgs.some(org => org.id === selectedOrganization?.id)) {
+        if (validOrgs.length > 0) {
+          setSelectedOrganization(validOrgs[0]);
+        } else {
+          setSelectedOrganization(null);
         }
-      } else {
-        // orgsData is empty or null
-        setSelectedOrganization(null);
+        if (isInitialLoad) {
+          setIsInitialLoad(false);
+        }
       }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -204,10 +215,14 @@ export default function Dashboard() {
     try {
       const token = await getToken();
       if (!token) {
-          toast.error("Authentication token not found.");
-          return;
+        toast.error("Authentication token not found.");
+        return;
       }
-      // Switch organization in backend (if this API exists and is necessary for backend state)
+      
+      // Update UI optimistically
+      setSelectedOrganization(organization);
+      
+      // Switch organization in backend
       const response = await fetch(`${getApiUrl()}/organizations/switch`, {
         method: 'POST',
         headers: {
@@ -218,13 +233,18 @@ export default function Dashboard() {
       });
       
       if (!response.ok) {
+        // Revert UI on error
+        const currentOrg = organizations.find(org => org.id === selectedOrganization?.id);
+        setSelectedOrganization(currentOrg || null);
+        
         const errorBody = await response.text();
         console.error("Failed to switch organization. Status:", response.status, "Body:", errorBody);
         throw new Error('Failed to switch organization in backend');
       }
       
-      setSelectedOrganization(organization); // This will trigger the useEffect for data loading
-      toast.success('Switched to ' + organization.name);
+      // Refresh data for the new organization
+      await fetchData(organization.id, token);
+      toast.success(`Switched to ${organization.name}`);
     } catch (error) {
       console.error('Error switching organization:', error);
       toast.error('Failed to switch organization. ' + (error instanceof Error ? error.message : ''));

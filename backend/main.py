@@ -402,40 +402,68 @@ async def get_organizations(user: Annotated[ClerkUser, Depends(get_clerk_user_pa
         logger.info(f"User {user.id} has {len(memberships)} Clerk organization memberships. Fetching from DB.")
         clerk_org_ids = [membership.organization.id for membership in memberships if hasattr(membership, 'organization') and hasattr(membership.organization, 'id')]
         
+        # First, get all organizations from Clerk
+        clerk_orgs = []
+        for clerk_org_id in clerk_org_ids:
+            try:
+                org = await clerk_service.get_organization(clerk_org_id)
+                if org:
+                    clerk_orgs.append(org)
+            except Exception as e:
+                logger.error(f"Error fetching organization {clerk_org_id} from Clerk: {e}")
+        
+        # Get organizations from database
         db_organizations = await db.organization.find_many(
             where={"clerk_org_id": {"in": clerk_org_ids}}
         )
         
+        # Create any missing organizations in the database
+        for clerk_org in clerk_orgs:
+            if not any(org.clerk_org_id == clerk_org.id for org in db_organizations):
+                logger.info(f"Creating missing organization in database: {clerk_org.name} ({clerk_org.id})")
+                try:
+                    new_org = await db.organization.create(
+                        data={
+                            "name": clerk_org.name,
+                            "clerk_org_id": clerk_org.id,
+                        }
+                    )
+                    db_organizations.append(new_org)
+                except Exception as e:
+                    logger.error(f"Error creating organization in database: {e}")
+        
         result = []
         for db_org_item in db_organizations:
             clerk_membership = next((m for m in memberships if hasattr(m, 'organization') and m.organization.id == db_org_item.clerk_org_id), None)
+            clerk_org = next((o for o in clerk_orgs if o.id == db_org_item.clerk_org_id), None)
             
-            if clerk_membership and hasattr(clerk_membership, 'organization'):
-                clerk_org_details = clerk_membership.organization
-                member_role = clerk_membership.role
+            if clerk_membership and hasattr(clerk_membership, 'organization') and clerk_org:
+                clerk_org_details = clerk_org
+                member_role = getattr(clerk_membership, 'role', 'basic_member')
 
                 clerk_created_at_str = ""
                 if hasattr(clerk_org_details, 'created_at') and clerk_org_details.created_at is not None:
                     if isinstance(clerk_org_details.created_at, (int, float)): # Unix timestamp
-                         clerk_created_at_str = datetime.fromtimestamp(clerk_org_details.created_at / 1000).isoformat()
+                        clerk_created_at_str = datetime.fromtimestamp(clerk_org_details.created_at / 1000).isoformat()
                     elif isinstance(clerk_org_details.created_at, datetime):
-                         clerk_created_at_str = clerk_org_details.created_at.isoformat()
+                        clerk_created_at_str = clerk_org_details.created_at.isoformat()
                     else:
-                         clerk_created_at_str = str(clerk_org_details.created_at)
+                        clerk_created_at_str = str(clerk_org_details.created_at)
                 
-                result.append({
-                    "id": db_org_item.id,
-                    "name": db_org_item.name, # Or clerk_org_details.name
+                org_data = {
+                    "id": str(db_org_item.id),
+                    "name": clerk_org.name or db_org_item.name,
                     "clerk_org_id": db_org_item.clerk_org_id,
                     "createdAt": db_org_item.createdAt.isoformat(),
                     "updatedAt": db_org_item.updatedAt.isoformat(),
                     "clerk_details": {
-                        "name": getattr(clerk_org_details, 'name', db_org_item.name),
-                        "slug": getattr(clerk_org_details, 'slug', None),
+                        "name": clerk_org.name or db_org_item.name,
+                        "slug": getattr(clerk_org, 'slug', None),
                         "created_at": clerk_created_at_str,
                         "role": member_role
                     }
-                })
+                }
+                result.append(org_data)
         
         logger.info(f"Returning {len(result)} organizations for user {user.id}.")
         return result
