@@ -271,18 +271,30 @@ async def root():
 @app.post("/organizations")
 async def create_organization(org: OrganizationCreate, user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]):
     """
-    Create an organization in both the database and Clerk (if not already created in Clerk)
+    Create an organization in both the database and Clerk, and associate the current user as an admin.
     """
-    # If clerk_org_id is provided, check if it exists in Clerk
     clerk_org_id = org.clerk_org_id
     
+    # Get user's email for database association
+    user_email = None
+    if hasattr(user, 'email_addresses') and user.email_addresses:
+        primary_email_id = getattr(user, 'primary_email_address_id', None)
+        if primary_email_id:
+            primary_email = next((e for e in user.email_addresses if hasattr(e, 'id') and e.id == primary_email_id), None)
+            if primary_email and hasattr(primary_email, 'email_address'):
+                user_email = primary_email.email_address
+    
+    if not user_email:
+        raise HTTPException(status_code=400, detail="User email is required to create an organization")
+    
+    # Create organization in Clerk
     if not clerk_org_id:
         try:
             # Create organization in Clerk
             clerk_org = await clerk_service.create_organization(name=org.name)
             clerk_org_id = clerk_org.id
             
-            # Add the current user to the organization
+            # Add the current user as admin to the organization in Clerk
             await clerk_service.add_user_to_organization(
                 user_id=user.id,
                 organization_id=clerk_org_id,
@@ -292,24 +304,48 @@ async def create_organization(org: OrganizationCreate, user: Annotated[ClerkUser
             logger.error(f"Error creating organization in Clerk: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to create organization in Clerk: {str(e)}")
     
-    # Create organization in database
+    # Create organization in database and associate the user
     try:
+        # First, ensure the user exists in our database
+        db_user = await db.user.find_unique(where={"clerk_user_id": user.id})
+        
+        if not db_user:
+            # Create the user if they don't exist
+            db_user = await db.user.create(
+                data={
+                    "clerk_user_id": user.id,
+                    "email": user_email,
+                    "name": getattr(user, 'first_name', '') + ' ' + getattr(user, 'last_name', ''),
+                    "organization": {
+                        "connect": {
+                            "clerk_org_id": clerk_org_id
+                        }
+                    }
+                }
+            )
+        
+        # Create the organization
         created_org = await db.organization.create(
             data={
                 "name": org.name,
                 "clerk_org_id": clerk_org_id,
+                "users": {
+                    "connect": [{"id": db_user.id}]
+                }
             }
         )
+        
         return created_org
+        
     except Exception as e:
-        # If we created the org in Clerk but failed to create it in the database,
-        # we should clean up by deleting the Clerk org
+        # If we created the org in Clerk but failed in the database, clean up
         if not org.clerk_org_id:  # Only if we created it in this request
             try:
                 await clerk_service.delete_organization(clerk_org_id)
             except Exception as cleanup_error:
                 logger.error(f"Failed to clean up Clerk organization after database error: {cleanup_error}")
         
+        logger.error(f"Error creating organization in database: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create organization in database: {str(e)}")
 
 @app.get("/organizations")
