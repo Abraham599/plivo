@@ -359,21 +359,24 @@ async def get_organizations(user: Annotated[ClerkUser, Depends(get_clerk_user_pa
         
         # Get user's organization memberships from Clerk
         memberships = await clerk_service.get_user_organizations(user_id=user.id)
+        logger.info(f"Retrieved {len(memberships)} memberships from Clerk for user {user.id}")
         
         if not memberships or not isinstance(memberships, list) or len(memberships) == 0:
             logger.info(f"User {user.id} has no organization memberships.")
             return []
         
-        logger.info(f"User {user.id} has {len(memberships)} Clerk organization memberships. Fetching from DB.")
+        # Extract clerk organization IDs
         clerk_org_ids = [
-            membership.organization.id 
-            for membership in memberships 
-            if hasattr(membership, 'organization') and hasattr(membership.organization, 'id')
+            membership['organization']['id']
+            for membership in memberships
+            if isinstance(membership, dict) and 'organization' in membership and 'id' in membership['organization']
         ]
         
         if not clerk_org_ids:
             logger.info(f"No valid organization IDs found for user {user.id}")
             return []
+        
+        logger.info(f"Fetching organizations from database for IDs: {clerk_org_ids}")
         
         # Get organizations from database
         db_organizations = await db.organization.find_many(
@@ -382,26 +385,25 @@ async def get_organizations(user: Annotated[ClerkUser, Depends(get_clerk_user_pa
         
         logger.info(f"Found {len(db_organizations)} organizations in database for user {user.id}")
         
+        # Create a mapping of clerk_org_id to membership for easier lookup
+        membership_map = {
+            m['organization']['id']: m 
+            for m in memberships 
+            if isinstance(m, dict) and 'organization' in m and 'id' in m['organization']
+        }
+        
         # Prepare the result with organization data
         result = []
         for db_org in db_organizations:
-            # Find the corresponding membership for this organization
-            membership = next(
-                (m for m in memberships 
-                 if hasattr(m, 'organization') 
-                 and hasattr(m.organization, 'id') 
-                 and m.organization.id == db_org.clerk_org_id),
-                None
-            )
-            
-            if not membership or not hasattr(membership, 'organization'):
+            membership = membership_map.get(db_org.clerk_org_id)
+            if not membership or 'organization' not in membership:
                 continue
                 
-            clerk_org = membership.organization
-            member_role = getattr(membership, 'role', 'basic_member')
+            clerk_org = membership['organization']
+            member_role = membership.get('role', 'basic_member')
             
             # Format created_at timestamp
-            clerk_created_at = getattr(clerk_org, 'created_at', None)
+            clerk_created_at = clerk_org.get('created_at')
             clerk_created_at_str = ""
             if clerk_created_at is not None:
                 if isinstance(clerk_created_at, (int, float)):  # Unix timestamp (ms)
@@ -419,8 +421,8 @@ async def get_organizations(user: Annotated[ClerkUser, Depends(get_clerk_user_pa
                 "createdAt": db_org.createdAt.isoformat(),
                 "updatedAt": db_org.updatedAt.isoformat(),
                 "clerk_details": {
-                    "name": getattr(clerk_org, 'name', db_org.name),
-                    "slug": getattr(clerk_org, 'slug', None),
+                    "name": clerk_org.get('name', db_org.name),
+                    "slug": clerk_org.get('slug'),
                     "created_at": clerk_created_at_str,
                     "role": member_role
                 }

@@ -96,9 +96,9 @@ class ClerkService:
             logger.error(f"Error adding user to organization: {e}")
             raise
     
-    async def get_user_organizations(self, user_id: str) -> List[dict]:
+    async def get_user_organizations(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        Get all organizations that a user is a member of
+        Get all organizations that the user is a member of
         
         Args:
             user_id: The Clerk user ID
@@ -109,35 +109,51 @@ class ClerkService:
         try:
             # Get user's organization memberships
             memberships = self.clerk.users.get_organization_memberships(user_id=user_id)
-            print(memberships)
+            logger.info(f"Raw memberships from Clerk: {memberships}")
+            
             # Create a list of membership objects with organization details
             result = []
             
-            # Check if memberships is a list or tuple
-            if isinstance(memberships, (list, tuple)):
+            # Handle case where memberships is a list of OrganizationMembership objects
+            if hasattr(memberships, 'data') and isinstance(memberships.data, list):
+                for membership in memberships.data:
+                    if hasattr(membership, 'organization') and membership.organization:
+                        result.append({
+                            'id': membership.id,
+                            'role': membership.role,
+                            'organization': {
+                                'id': membership.organization.id,
+                                'name': membership.organization.name,
+                                'slug': getattr(membership.organization, 'slug', None),
+                                'created_at': membership.organization.created_at,
+                                'updated_at': membership.organization.updated_at
+                            },
+                            'created_at': membership.created_at,
+                            'updated_at': membership.updated_at
+                        })
+            # Handle case where memberships is a list directly
+            elif isinstance(memberships, (list, tuple)):
                 for membership in memberships:
-                    # Check if membership is a tuple (id, role) or an object
-                    if isinstance(membership, tuple) and len(membership) >= 2:
-                        # It's a tuple with (org_id, role)
-                        org_id, role = membership[0], membership[1]
-                        
-                        # Get organization details
-                        try:
-                            org = self.clerk.organizations.get_organization(organization_id=org_id)
-                            # Create a membership object with organization details
-                            result.append({
-                                "role": role,
-                                "organization": org
-                            })
-                        except Exception as org_error:
-                            logger.error(f"Error getting organization details: {org_error}")
-                    else:
-                        # It's already an object with organization details
-                        result.append(membership)
+                    if hasattr(membership, 'organization') and membership.organization:
+                        result.append({
+                            'id': getattr(membership, 'id', ''),
+                            'role': getattr(membership, 'role', 'basic_member'),
+                            'organization': {
+                                'id': membership.organization.id,
+                                'name': membership.organization.name,
+                                'slug': getattr(membership.organization, 'slug', None),
+                                'created_at': getattr(membership.organization, 'created_at', None),
+                                'updated_at': getattr(membership.organization, 'updated_at', None)
+                            },
+                            'created_at': getattr(membership, 'created_at', None),
+                            'updated_at': getattr(membership, 'updated_at', None)
+                        })
             
+            logger.info(f"Processed {len(result)} organization memberships for user {user_id}")
             return result
+            
         except Exception as e:
-            logger.error(f"Error getting user organizations: {e}")
+            logger.error(f"Error getting user organizations: {e}", exc_info=True)
             return []  # Return empty list instead of raising to avoid breaking the flow
     
     async def get_organization(self, organization_id: str) -> ClerkOrganization:
