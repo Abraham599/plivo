@@ -70,7 +70,7 @@ export const useOrganizationStore = create<OrganizationStore>((set, get) => ({
         currentOrg = {
           id: syncData.organization_id,
           name: 'Your Organization',  // Default name
-          clerk_org_id: syncData.organization_id, // Using the same ID
+          clerk_org_id: syncData.clerk_org_id, // Using the same ID
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           clerk_details: {

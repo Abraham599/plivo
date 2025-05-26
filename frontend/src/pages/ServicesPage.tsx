@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { useUser, useAuth } from "@clerk/clerk-react";
-import { useServiceStore, type Service, type ServiceStatus } from "../stores/serviceStore";
+import { useAuth } from "@clerk/clerk-react";
+import { useServiceStore, type Service } from "../stores/serviceStore";
+
+type ServiceStatus = "operational" | "degraded" | "partial_outage" | "major_outage" | "maintenance";
 import { useOrganizationStore } from "../stores/organizationStore"; // Added import
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,7 +37,6 @@ const formatStatusDisplayName = (status: ServiceStatus): string => {
 };
 
 export default function ServicesPage() {
-  const { user } = useUser();
   const { services, isLoading, error, fetchServices, createService, updateService, deleteService } = useServiceStore();
   const { getToken } = useAuth();
   const { currentOrganization } = useOrganizationStore(); // Added to get current organization
@@ -48,6 +49,7 @@ export default function ServicesPage() {
   const [newServiceName, setNewServiceName] = useState("");
   const [newServiceDescription, setNewServiceDescription] = useState("");
   const [newServiceEndpoint, setNewServiceEndpoint] = useState("");
+  const [newServiceStatus, setNewServiceStatus] = useState<ServiceStatus>("operational");
 
   // Strongly type editingService
   const [editingService, setEditingService] = useState<Service | null>(null);
@@ -85,11 +87,12 @@ export default function ServicesPage() {
 
   const handleCreateService = async () => {
     if (!newServiceName.trim()) {
-      toast("Error", { description: "Service name is required" });
+      toast.error("Service name is required");
       return;
     }
-    if (!user?.organizationMemberships?.[0]?.organization?.id) {
-      toast("Error", { description: "Organization not found" });
+
+    if (!currentOrganization?.id) {
+      toast.error("No organization selected");
       return;
     }
 
@@ -98,17 +101,19 @@ export default function ServicesPage() {
         name: newServiceName,
         description: newServiceDescription,
         url: newServiceEndpoint,
-        status: "operational", // This is a valid ServiceStatus
-        organizationId: user.organizationMemberships[0].organization.id,
+        status: newServiceStatus,
+        organizationId: currentOrganization.id,
       });
 
       setNewServiceName("");
       setNewServiceDescription("");
       setNewServiceEndpoint("");
+      setNewServiceStatus("operational");
       setIsCreateDialogOpen(false);
-      toast("Success", { description: "Service created successfully" });
-    } catch (e: any) {
-      toast("Error", { description: e.message || "Failed to create service" });
+      toast.success("Service created successfully");
+    } catch (error) {
+      console.error("Error creating service:", error);
+      toast.error("Failed to create service");
     }
   };
 
@@ -124,11 +129,11 @@ export default function ServicesPage() {
 
   const handleUpdateService = async () => {
     if (!editingService) {
-      toast("Error", { description: "No service selected for editing." });
+      toast.error("No service selected for editing.");
       return;
     }
     if (!editServiceName.trim()) {
-      toast("Error", { description: "Service name is required" });
+      toast.error("Service name is required");
       return;
     }
 
@@ -140,9 +145,10 @@ export default function ServicesPage() {
         url: editServiceEndpoint,
       });
       setIsEditDialogOpen(false);
-      toast("Success", { description: "Service updated successfully" });
-    } catch (e: any) {
-      toast("Error", { description: e.message || "Failed to update service" });
+      toast.success("Service updated successfully");
+    } catch (error) {
+      console.error("Error updating service:", error);
+      toast.error("Failed to update service");
     }
   };
 
@@ -152,9 +158,10 @@ export default function ServicesPage() {
         await deleteService(deletingServiceId);
         setIsDeleteDialogOpen(false);
         setDeletingServiceId(null);
-        toast("Success", { description: "Service deleted successfully" });
-      } catch (e: any) {
-        toast("Error", { description: e.message || "Failed to delete service" });
+        toast.success("Service deleted successfully");
+      } catch (error) {
+        console.error("Error deleting service:", error);
+        toast.error("Failed to delete service");
       }
     }
   };
@@ -271,32 +278,50 @@ export default function ServicesPage() {
               <Label htmlFor="name">Name</Label>
               <Input
                 id="name"
+                placeholder="Enter service name"
                 value={newServiceName}
                 onChange={(e) => setNewServiceName(e.target.value)}
-                placeholder="e.g., Website, API, Database"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="description">Description (optional)</Label>
+              <Label htmlFor="description">Description (Optional)</Label>
               <Textarea
                 id="description"
+                placeholder="Enter service description"
                 value={newServiceDescription}
                 onChange={(e) => setNewServiceDescription(e.target.value)}
-                placeholder="Brief description of the service"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="endpoint">Monitoring URL (optional)</Label>
+              <Label htmlFor="status">Status</Label>
+              <Select
+                value={newServiceStatus}
+                onValueChange={(value: ServiceStatus) => setNewServiceStatus(value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="operational">Operational</SelectItem>
+                  <SelectItem value="degraded">Degraded Performance</SelectItem>
+                  <SelectItem value="partial_outage">Partial Outage</SelectItem>
+                  <SelectItem value="major_outage">Major Outage</SelectItem>
+                  <SelectItem value="maintenance">Maintenance</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="endpoint">Endpoint (Optional)</Label>
               <Input
                 id="endpoint"
+                placeholder="https://example.com/health"
                 value={newServiceEndpoint}
                 onChange={(e) => setNewServiceEndpoint(e.target.value)}
-                placeholder="e.g., https://api.example.com/health"
               />
-              <p className="text-xs text-gray-500">
-                If provided, we'll periodically check this URL to monitor the service's uptime.
-              </p>
             </div>
+            <p className="text-xs text-gray-500">
+              If provided, we'll periodically check this URL to monitor the service's uptime.
+            </p>
             <div className="flex justify-end space-x-2">
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                 Cancel

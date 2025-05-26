@@ -7,9 +7,11 @@ export interface Service {
   id: string;
   name: string;
   description?: string;
-  status: ServiceStatus; // Use the exported ServiceStatus type
+  status: ServiceStatus;
   url?: string;
+  endpoint?: string;
   organizationId: string;
+  organization_id?: string; // Add this to match backend response
   createdAt: string;
   updatedAt: string;
 }
@@ -118,9 +120,11 @@ export const useServiceStore = create<ServiceStore>((set) => ({
           "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
-          ...serviceData,
-          organization_id: syncData.organization_id,
+          name: serviceData.name,
+          description: serviceData.description,
+          status: serviceData.status || 'operational',
           endpoint: serviceData.url, // Map url to endpoint as expected by backend
+          organization_id: syncData.organization_id,
         }),
       });
 

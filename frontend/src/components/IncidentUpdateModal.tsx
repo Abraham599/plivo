@@ -26,6 +26,21 @@ export function IncidentUpdateModal({ open, onOpenChange, incident, onUpdateAdde
     setIsLoading(true);
     try {
       const token = await getToken();
+      // First update the incident status if it changed
+      if (status !== incident.status) {
+        await fetch(`${import.meta.env.VITE_API_URL}/incidents/${incident.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            status: status
+          }),
+        });
+      }
+
+      // Then create the update
       const response = await fetch(`${import.meta.env.VITE_API_URL}/incidents/${incident.id}/updates`, {
         method: "POST",
         headers: {
@@ -34,14 +49,18 @@ export function IncidentUpdateModal({ open, onOpenChange, incident, onUpdateAdde
         },
         body: JSON.stringify({
           message,
-          status: status !== incident.status ? status : undefined,
         }),
       });
 
-      if (!response.ok) throw new Error("Failed to add update");
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Failed to add update:", errorData);
+        throw new Error("Failed to add update");
+      }
 
       await onUpdateAdded();
       onOpenChange(false);
+      setMessage("");
       toast.success("Update added successfully");
     } catch (error) {
       toast.error("Failed to add update");

@@ -5,7 +5,7 @@ import type { Service, ServiceStatus } from "../stores/serviceStore"
 import type { Incident } from "../stores/incidentStore"
 import { getAuthHeaders, getApiUrl } from "../lib/api"
 import type { IncidentStatus } from "../lib/format"
-import type { Organization } from "../api/userApi"
+import type { Organization } from "../api/userApi" // Ensure this type matches backend response
 import { useAuth } from "@clerk/clerk-react"
 import { format } from "date-fns"
 import { formatServiceStatusDisplayName, formatIncidentStatusDisplayName } from "../lib/format"
@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ServiceUptimeCard } from "../components/ServiceUptimeCard"
 import { Button } from "@/components/ui/button"
-import { MoreVertical, ArrowUpDown, Clock, AlertCircle, MessageSquare, Check, Pencil, Bell, Loader2 } from "lucide-react";
+import { MoreVertical, ArrowUpDown, Clock, AlertCircle, MessageSquare, Check, Pencil, Bell, Loader2, Plus } from "lucide-react";
 import { ServiceEditModal } from "../components/ServiceEditModal";
 import { IncidentUpdateModal } from "../components/IncidentUpdateModal";
 import { DashboardSettings } from "../components/DashboardSettings"
@@ -25,15 +25,38 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner"
 
 export default function Dashboard() {
-  const { isLoaded: authIsLoaded } = useAuth();
+  const { isLoaded: authIsLoaded, getToken } = useAuth(); // getToken from useAuth
   const [services, setServices] = useState<Service[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const { getToken } = useAuth();
+  const [isPageLoading, setIsPageLoading] = useState(true); // Start with true
+
+  // Consolidated useEffect for data loading
+  useEffect(() => {
+    const loadAllData = async () => {
+      if (!authIsLoaded) {
+        // console.log("Auth not loaded yet, skipping data load.");
+        return;
+      }
+      const token = await getToken();
+      if (!token) {
+        // console.log("Token not available yet, skipping data load.");
+        // If token is essential for initial load, consider setting isPageLoading to false
+        // or showing an error/login prompt if it remains unavailable.
+        // For now, we let fetchData handle its own loading state if it proceeds.
+        setIsPageLoading(false); // No token, can't fetch, stop loading.
+        return;
+      }
+      // fetchData will set isPageLoading true at its start.
+      await fetchData(selectedOrganization?.id, token);
+    };
+
+    loadAllData();
+  }, [authIsLoaded, getToken, selectedOrganization]); // Dependencies
 
   const fetchData = async (organizationId?: string | null, token?: string | null): Promise<void> => {
+    setIsPageLoading(true); // Set loading true at the beginning of any fetch attempt
     try {
       const headers = getAuthHeaders(token);
       
@@ -60,20 +83,30 @@ export default function Dashboard() {
         `${getApiUrl()}/organizations`,
         { headers }
       );
-      if (!orgsResponse.ok) throw new Error("Failed to fetch organizations");
+      if (!orgsResponse.ok) {
+        const errorBody = await orgsResponse.text();
+        console.error("Failed to fetch organizations. Status:", orgsResponse.status, "Body:", errorBody);
+        throw new Error(`Failed to fetch organizations (status ${orgsResponse.status})`);
+      }
       const orgsData = await orgsResponse.json();
+      console.log("Fetched organizations data:", orgsData);
       setOrganizations(orgsData);
       
-      // Set first organization as selected if none selected
-      if (!selectedOrganization && orgsData.length > 0) {
-        setSelectedOrganization(orgsData[0]);
+      if (orgsData && orgsData.length > 0) {
+        // Only update selected organization if we don't have one or if the current one is invalid
+        if (!selectedOrganization || !orgsData.some((org: any) => org.id === selectedOrganization?.id)) {
+          setSelectedOrganization(orgsData[0]);
+        }
+      } else {
+        // orgsData is empty or null
+        setSelectedOrganization(null);
       }
-
-      setIsLoading(false);
     } catch (error) {
-      console.error('Error fetching data:', error);
-      toast.error('Failed to fetch data');
-      setIsLoading(false);
+      console.error("Error fetching data:", error);
+      toast.error("Failed to load data. " + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      // Always set loading to false when done, whether successful or not
+      setIsPageLoading(false);
     }
   };
 
@@ -89,7 +122,9 @@ export default function Dashboard() {
       body: JSON.stringify({ status: newStatus.toLowerCase().replace(/ /g, "_") }),
     });
     if (!response.ok) throw new Error('Failed to update service');
-    return response.json();
+    // No need to return response.json() if type is void.
+    // Refetch data to update UI consistently
+    if (token) await fetchData(selectedOrganization?.id, token);
   };
 
   // Function to update incident
@@ -104,7 +139,10 @@ export default function Dashboard() {
       body: JSON.stringify(updates)
     });
     if (!response.ok) throw new Error('Failed to update incident');
-    return response.json();
+    const updatedIncident = await response.json();
+    // Refetch data to update UI consistently
+    if (token) await fetchData(selectedOrganization?.id, token);
+    return updatedIncident;
   };
 
   const [showSettings, setShowSettings] = useState(false);
@@ -112,13 +150,64 @@ export default function Dashboard() {
   const [showIncidentModal, setShowIncidentModal] = useState(false);
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
   const [selectedServiceForIncident, setSelectedServiceForIncident] = useState<string | undefined>(undefined);
-  const [selectedServiceForEdit, setSelectedServiceForEdit] = useState<Service | undefined>(undefined);
+  const [selectedServiceForEdit, setSelectedServiceForEdit] = useState<Service | null>(null);
+  const [isServiceEditModalOpen, setIsServiceEditModalOpen] = useState(false);
+
+  const handleCreateService = async (serviceData: { name: string; description?: string; endpoint?: string }) => {
+    try {
+      const token = await getToken();
+      if (!token) {
+        toast.error('Authentication required');
+        return;
+      }
+      
+      if (!selectedOrganization?.id) {
+        toast.error('Please select an organization first');
+        return;
+      }
+
+      const response = await fetch(`${getApiUrl()}/services`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: serviceData.name,
+          description: serviceData.description || undefined,
+          endpoint: serviceData.endpoint || undefined,
+          organization_id: selectedOrganization.id
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to create service');
+      }
+
+      const createdService = await response.json();
+      toast.success(`Service "${createdService.name}" created successfully`);
+      
+      await fetchData(selectedOrganization.id, token); // Refresh data
+      
+      return createdService;
+    } catch (error) {
+      console.error('Error creating service:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to create service');
+      throw error;
+    }
+  };
+
   const [selectedIncidentForUpdate, setSelectedIncidentForUpdate] = useState<Incident | undefined>(undefined);
 
   const handleOrganizationChange = async (organization: Organization): Promise<void> => {
     try {
       const token = await getToken();
-      // Switch organization in backend
+      if (!token) {
+          toast.error("Authentication token not found.");
+          return;
+      }
+      // Switch organization in backend (if this API exists and is necessary for backend state)
       const response = await fetch(`${getApiUrl()}/organizations/switch`, {
         method: 'POST',
         headers: {
@@ -128,38 +217,24 @@ export default function Dashboard() {
         body: JSON.stringify({ organization_id: organization.id })
       });
       
-      if (!response.ok) throw new Error('Failed to switch organization');
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error("Failed to switch organization. Status:", response.status, "Body:", errorBody);
+        throw new Error('Failed to switch organization in backend');
+      }
       
-      setSelectedOrganization(organization);
-      // Refetch data for new organization
-      await fetchData(organization.id);
+      setSelectedOrganization(organization); // This will trigger the useEffect for data loading
       toast.success('Switched to ' + organization.name);
     } catch (error) {
       console.error('Error switching organization:', error);
-      toast.error('Failed to switch organization');
+      toast.error('Failed to switch organization. ' + (error instanceof Error ? error.message : ''));
     }
   };
 
   const handleOrganizationCreated = (organization: Organization) => {
     setOrganizations(prev => [...prev, organization]);
-    handleOrganizationChange(organization);
+    handleOrganizationChange(organization); 
   };
-
-  useEffect(() => {
-    if (!authIsLoaded) return;
-
-    const loadData = async () => {
-      try {
-        const token = await getToken();
-        await fetchData(selectedOrganization?.id, token);
-      } catch (error) {
-        console.error('Error loading data:', error);
-      }
-    };
-    loadData();
-  }, [selectedOrganization?.id, getToken]);
-
-  // Data loading effect only - no auto-refresh
 
   const activeIncidents = incidents.filter((incident) => incident.status !== "resolved");
   const resolvedIncidents = incidents.filter((incident) => incident.status === "resolved");
@@ -172,8 +247,7 @@ export default function Dashboard() {
       case "major_outage": return "bg-red-500";
       case "maintenance": return "bg-blue-500";
       default:
-        const exhaustiveCheck: never = status;
-        return exhaustiveCheck;
+        return "bg-gray-500"; 
     }
   };
 
@@ -183,17 +257,15 @@ export default function Dashboard() {
       case "identified": return "bg-orange-500";
       case "monitoring": return "bg-blue-500";
       case "resolved": return "bg-green-500";
-      case "scheduled": return "bg-purple-500";
+      case "scheduled": return "bg-purple-500"; 
       default:
-        const exhaustiveCheck: never = status;
-        return exhaustiveCheck;
+        return "bg-gray-500"; 
     }
   };
 
-  // Type guard to ensure service has a URL property
-const servicesWithUrls = services.filter((service): service is Service & { url: string } => !!service.url);
+  const servicesWithUrls = services.filter((service): service is Service & { url: string } => !!service.url);
 
-  if (!authIsLoaded) {
+  if (!authIsLoaded && isPageLoading) { 
     return (
         <div className="flex justify-center items-center h-screen">
             <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -206,7 +278,7 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-4">
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          {isLoading ? (
+          {isPageLoading && !selectedOrganization ? ( 
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <OrganizationSelector
@@ -225,14 +297,103 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
             Notification Settings
           </Button>
         </div>
-        <Button onClick={() => setShowIncidentModal(true)}>
-          <AlertCircle className="h-4 w-4 mr-2" />
-          Report Incident
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={() => {
+              if (!selectedOrganization) {
+                toast.error('Please select an organization first');
+                return;
+              }
+              setSelectedServiceForEdit(null); 
+              setIsServiceEditModalOpen(true);
+            }}
+            disabled={!selectedOrganization || isPageLoading} 
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Create Service
+          </Button>
+          <Button 
+            onClick={() => {
+                if (!selectedOrganization) {
+                    toast.error('Please select an organization first to report an incident.');
+                    return;
+                }
+                setShowIncidentModal(true);
+            }}
+            disabled={!selectedOrganization || isPageLoading} 
+          >
+            <AlertCircle className="h-4 w-4 mr-2" />
+            Report Incident
+          </Button>
+        </div>
       </div>
 
       {showSettings && <DashboardSettings />}
+      
+      <ServiceEditModal
+        open={isServiceEditModalOpen && selectedServiceForEdit === null}
+        onOpenChange={(open) => {
+            if (!open) {
+                setIsServiceEditModalOpen(false);
+            } else {
+                setIsServiceEditModalOpen(true);
+            }
+        }}
+        service={null} 
+        onSave={async (serviceData) => { 
+            try {
+                await handleCreateService(serviceData);
+                setIsServiceEditModalOpen(false);
+            } catch (error) {
+                // Error is handled by handleCreateService
+            }
+        }}
+      />
 
+      {selectedServiceForEdit !== null && (
+        <ServiceEditModal
+          open={isServiceEditModalOpen && selectedServiceForEdit !== null}
+          onOpenChange={(open) => {
+            setIsServiceEditModalOpen(open);
+            if (!open) setSelectedServiceForEdit(null); 
+          }}
+          service={selectedServiceForEdit} 
+          onSave={async (serviceData) => { 
+            try {
+                const token = await getToken();
+                if (!token) {
+                    toast.error('Authentication required');
+                    return;
+                }
+                if (!selectedServiceForEdit?.id) return; 
+
+                const response = await fetch(`${getApiUrl()}/services/${selectedServiceForEdit.id}`, {
+                    method: 'PATCH', 
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(serviceData)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || 'Failed to update service');
+                }
+                toast.success('Service updated successfully');
+                await fetchData(selectedOrganization?.id, token); 
+                setIsServiceEditModalOpen(false);
+                setSelectedServiceForEdit(null);
+            } catch (error) {
+                console.error('Error updating service:', error);
+                toast.error(error instanceof Error ? error.message : 'Failed to update service');
+            }
+          }}
+        />
+      )}
+      
+    
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
@@ -249,7 +410,11 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {services.length === 0 ? (
+            {isPageLoading && services.length === 0 ? (
+                 <div className="flex justify-center items-center py-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                 </div>
+            ) : services.length === 0 ? (
               <p className="text-gray-500 dark:text-gray-400 text-center py-4">No services found. Create your first service.</p>
             ) : (
               [...services]
@@ -272,38 +437,63 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                       </div>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button 
+                            variant="ghost" 
+                            className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
+                          >
                             <MoreVertical className="h-4 w-4" />
+                            <span className="sr-only">More options</span>
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {Object.entries({
-                            operational: "Operational",
-                            degraded: "Degraded Performance",
-                            partial_outage: "Partial Outage",
-                            major_outage: "Major Outage",
-                            maintenance: "Maintenance"
-                          } as const).map(([_, value]) => value).map((status) => (
+                        <DropdownMenuContent 
+                          align="end" 
+                          className="z-50 min-w-[200px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg overflow-hidden"
+                        >
+                          {[
+                            'Operational',
+                            'Degraded Performance',
+                            'Partial Outage',
+                            'Major Outage',
+                            'Maintenance'
+                          ].map((statusDisplayName) => (
                             <DropdownMenuItem
-                              key={status}
+                              key={statusDisplayName}
                               onClick={async () => {
                                 try {
-                                  await updateServiceStatus(service.id, status.toLowerCase().replace(/ /g, "_"));
-                                  if (selectedOrganization?.id) {
-                                    await fetchData(selectedOrganization.id);
+                                  type StatusDisplayMap = {
+                                    [key in ServiceStatus]: string;
+                                  };
+                                  
+                                  const statusMap: StatusDisplayMap = {
+                                    'operational': 'Operational',
+                                    'degraded': 'Degraded Performance',
+                                    'partial_outage': 'Partial Outage',
+                                    'major_outage': 'Major Outage',
+                                    'maintenance': 'Maintenance'
+                                  };
+                                  
+                                  const statusKey = (Object.entries(statusMap) as [ServiceStatus, string][]).find(
+                                    ([_, displayName]) => displayName === statusDisplayName
+                                  )?.[0];
+
+                                  if (statusKey) {
+                                    await updateServiceStatus(service.id, statusKey);
+                                    toast.success(`Updated ${service.name} status to ${statusDisplayName}`);
+                                  } else {
+                                    toast.error(`Invalid status key for ${statusDisplayName}`);
                                   }
-                                  toast.success(`Updated ${service.name} status to ${status}`);
                                 } catch (error) {
                                   toast.error(`Failed to update ${service.name} status`);
                                 }
                               }}
                             >
-                              {status}
+                              {statusDisplayName}
                             </DropdownMenuItem>
                           ))}
                           <DropdownMenuItem
                             onClick={() => {
                               setSelectedServiceForEdit(service);
+                              setIsServiceEditModalOpen(true);
                             }}
                           >
                             <Pencil className="mr-2 h-4 w-4" />
@@ -311,10 +501,15 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
+                              if (!selectedOrganization) {
+                                  toast.error("Please select an organization first.");
+                                  return;
+                              }
                               setSelectedServiceForIncident(service.id);
                               setShowIncidentModal(true);
                             }}
                             className="text-red-600 dark:text-red-400"
+                            disabled={!selectedOrganization}
                           >
                             <AlertCircle className="mr-2 h-4 w-4" />
                             Report Incident
@@ -346,22 +541,22 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
         services={services}
         onIncidentCreated={async () => {
           const token = await getToken();
-          if (token) await fetchData(selectedOrganization?.id);
+          if (token) await fetchData(selectedOrganization?.id, token);
         }}
         selectedServiceId={selectedServiceForIncident}
-        organizationId={selectedOrganization?.id}
+        organizationId={selectedOrganization?.id} 
       />
 
-      <IncidentModal
+      <IncidentModal 
         open={showMaintenanceModal}
         onOpenChange={setShowMaintenanceModal}
         services={services}
         onIncidentCreated={async () => {
           const token = await getToken();
-          if (token) await fetchData(selectedOrganization?.id);
+          if (token) await fetchData(selectedOrganization?.id, token);
         }}
         type="maintenance"
-        organizationId={selectedOrganization?.id}
+        organizationId={selectedOrganization?.id} 
       />
 
       <Tabs defaultValue="active" className="w-full">
@@ -373,7 +568,11 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
         <TabsContent value="active">
           <Card>
             <CardContent className="pt-6">
-              {activeIncidents.length === 0 ? (
+              {isPageLoading && activeIncidents.length === 0 ? (
+                 <div className="flex justify-center items-center py-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                 </div>
+              ) : activeIncidents.length === 0 ? (
                 <p className="text-gray-500 dark:text-gray-400 text-center py-4">No active incidents.</p>
               ) : (
                 <div className="space-y-4">
@@ -408,8 +607,6 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                           onClick={async () => {
                             try {
                               await updateIncident(incident.id, { status: "resolved" });
-                              const token = await getToken();
-                              if (token) await fetchData(selectedOrganization?.id);
                               toast.success("Incident resolved");
                             } catch (error) {
                               toast.error("Failed to resolve incident");
@@ -440,7 +637,16 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
             <CardContent className="pt-6">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-lg font-medium">Scheduled Maintenance</h3>
-                <Button onClick={() => setShowMaintenanceModal(true)}>
+                <Button 
+                    onClick={() => {
+                        if (!selectedOrganization) {
+                            toast.error("Please select an organization first to schedule maintenance.");
+                            return;
+                        }
+                        setShowMaintenanceModal(true)
+                    }}
+                    disabled={!selectedOrganization || isPageLoading}
+                >
                   <Clock className="h-4 w-4 mr-2" />
                   Schedule Maintenance
                 </Button>
@@ -456,7 +662,7 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                           Scheduled for: {format(new Date(incident.createdAt), "PPP p")}
                         </p>
                       </div>
-                      <Badge variant="outline">
+                      <Badge variant="outline"> 
                         Scheduled
                       </Badge>
                     </div>
@@ -467,9 +673,7 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                         size="sm"
                         onClick={async () => {
                           try {
-                            await updateIncident(incident.id, { status: "monitoring" });
-                            const token = await getToken();
-                            if (token) await fetchData(selectedOrganization?.id);
+                            await updateIncident(incident.id, { status: "monitoring" }); 
                             toast.success("Maintenance started");
                           } catch (error) {
                             toast.error("Failed to start maintenance");
@@ -478,17 +682,27 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                       >
                         Start Maintenance
                       </Button>
-                     
                     </div>
                   </div>
                 ))}
+                 {isPageLoading && incidents.filter((i) => i.status === "scheduled").length === 0 ? (
+                     <div className="flex justify-center items-center py-4">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                     </div>
+                 ) : incidents.filter((i) => i.status === "scheduled").length === 0 && (
+                    <p className="text-gray-500 dark:text-gray-400 text-center py-4">No scheduled maintenance.</p>
+                 )}
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="resolved">
           <Card>
             <CardContent className="pt-6">
-              {resolvedIncidents.length === 0 ? (
+              {isPageLoading && resolvedIncidents.length === 0 ? (
+                 <div className="flex justify-center items-center py-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                 </div>
+              ) : resolvedIncidents.length === 0 ? (
                 <p className="text-gray-500 dark:text-gray-400 text-center py-4">No resolved incidents.</p>
               ) : (
                 <div className="space-y-4">
@@ -498,7 +712,7 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                         <div>
                           <h3 className="font-medium">{incident.title}</h3>
                           <p className="text-sm text-gray-500 dark:text-gray-400">Created: {format(new Date(incident.createdAt), "PPP p")}</p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400">Resolved: {format(new Date(incident.updatedAt), "PPP p")}</p>
+                          {incident.updatedAt && <p className="text-sm text-gray-500 dark:text-gray-400">Resolved: {format(new Date(incident.updatedAt), "PPP p")}</p>}
                         </div>
                         <Badge className={`${getIncidentStatusColor(incident.status)} text-white`}>
                           {formatIncidentStatusDisplayName(incident.status)}
@@ -517,33 +731,6 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
                           </div>
                         </div>
                       )}
-                      <div className="flex items-center gap-4 mt-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              await updateIncident(incident.id, { status: "resolved" });
-                              const token = await getToken();
-                              if (token) await fetchData(selectedOrganization?.id);
-                              toast.success("Incident resolved");
-                            } catch (error) {
-                              toast.error("Failed to resolve incident");
-                            }
-                          }}
-                        >
-                          <Check className="h-4 w-4 mr-2" />
-                          Resolve
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedIncidentForUpdate(incident)}
-                        >
-                          <MessageSquare className="h-4 w-4 mr-2" />
-                          Add Update
-                        </Button>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -553,18 +740,6 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
         </TabsContent>
       </Tabs>
 
-      {selectedServiceForEdit && (
-        <ServiceEditModal
-          open={!!selectedServiceForEdit}
-          onOpenChange={(open) => !open && setSelectedServiceForEdit(undefined)}
-          service={selectedServiceForEdit}
-          onServiceUpdated={async () => {
-            const token = await getToken();
-            if (token) await fetchData(selectedOrganization?.id);
-          }}
-        />
-      )}
-
       {selectedIncidentForUpdate && (
         <IncidentUpdateModal
           open={!!selectedIncidentForUpdate}
@@ -572,7 +747,8 @@ const servicesWithUrls = services.filter((service): service is Service & { url: 
           incident={selectedIncidentForUpdate}
           onUpdateAdded={async () => {
             const token = await getToken();
-            if (token) await fetchData(selectedOrganization?.id);
+            if (token) await fetchData(selectedOrganization?.id, token); 
+            setSelectedIncidentForUpdate(undefined); 
           }}
         />
       )}
