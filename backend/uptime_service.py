@@ -48,7 +48,7 @@ class UptimeService:
                     }
                 )
                 
-               if status and service.status != "operational":
+            if status and service.status != "operational":
                     # Only auto-update to operational if there are no active incidents
                     active_incidents = await self.db.incident.count(
                         where={
