@@ -1425,7 +1425,7 @@ async def get_service_uptime_metrics(
     Get uptime metrics for a service based on incident history
     """
     # Calculate time range based on period
-    now = datetime.utcnow()
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)  # Make now timezone-aware
     if period == "24h":
         start_time = now - timedelta(hours=24)
         days = 1
