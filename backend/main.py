@@ -1446,9 +1446,9 @@ async def get_service_uptime_metrics(
     checks = await db.uptimecheck.find_many(
         where={
             "service_id": service_id,
-            "timestamp": {"gte": start_time}
+            "checked_at": {"gte": start_time}
         },
-        order_by={"timestamp": "asc"}
+        order_by={"checked_at": "asc"}
     )
     
     # Format the response
@@ -1460,7 +1460,7 @@ async def get_service_uptime_metrics(
         }
         for check in checks
     ]
-    
+
 @app.get("/services")
 async def get_services():
     """Get a list of all services and their current status."""
