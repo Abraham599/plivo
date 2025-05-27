@@ -272,7 +272,7 @@ class IncidentUpdate(BaseModel):
 
 class UpdateCreate(BaseModel):
     message: str
-    incident_id: str
+    incident_id: Optional[str] = None
 
 class OrganizationCreate(BaseModel):
     name: str
@@ -658,30 +658,39 @@ async def update_service(service_id: str, service_update: ServiceUpdate, user: A
     old_status = current_service.status
     
     # Convert to dict and exclude unset values
-    updated_data = {k: v for k, v in service_update.model_dump().items() if v is not None}
+    update_data = service_update.model_dump(exclude_unset=True)
     
+    # Only update if there are changes
+    if not update_data:
+        return current_service
+    
+    # Update the service
     service = await db.service.update(
         where={"id": service_id},
-        data=updated_data
+        data=update_data
     )
     
     # If status has changed, send notification
-    if service_update.status and service_update.status != old_status:
+    if service_update.status is not None and service_update.status != old_status:
         await notification_service.send_service_status_change_notification(
             service_id=service_id,
             old_status=old_status,
             new_status=service_update.status
         )
     
-    if service_update.status:
-        await manager.broadcast(json.dumps({
-            "type": "service_updated",
-            "data": {
-                "id": service.id,
-                "name": service.name,
-                "status": service.status
-            }
-        }))
+    # Always broadcast the update
+    await manager.broadcast(json.dumps({
+        "type": "service_updated",
+        "data": {
+            "id": service.id,
+            "name": service.name,
+            "status": service.status,
+            "description": service.description,
+            "endpoint": service.endpoint,
+            "updatedAt": service.updated_at.isoformat() if service.updated_at else None
+        }
+    }))
+    
     return service
 
 @app.delete("/services/{service_id}")
@@ -846,10 +855,6 @@ async def create_incident_update(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     
-    # Create the update with the incident ID from the path
-    update_data = update.dict()
-    update_data["incident_id"] = incident_id
-    
     # Create the update
     new_update = await db.update.create(
         data={
@@ -867,7 +872,7 @@ async def create_incident_update(
             "id": new_update.id,
             "message": new_update.message,
             "created_at": new_update.created_at.isoformat(),
-            "incident_id": new_update.incident_id,
+            "incident_id": incident_id,
             "created_by": user.id
         }
     })
