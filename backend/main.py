@@ -719,20 +719,6 @@ async def create_incident(incident: IncidentCreate, user: Annotated[Any, Depends
         }
     )
     
-    # Update service statuses based on incident status
-    for service_id in incident.service_ids:
-        service = await db.service.find_unique(where={"id": service_id})
-        if service and service.status != incident.status:
-            await db.service.update(
-                where={"id": service_id},
-                data={"status": incident.status}
-            )
-            # Send notification for service status change
-            await notification_service.send_service_status_change_notification(
-                service_id=service_id,
-                old_status=service.status,
-                new_status=incident.status
-            )
     
     # Send notification for new incident
     await notification_service.send_new_incident_notification(incident_id=created_incident.id)
@@ -803,22 +789,7 @@ async def update_incident(incident_id: str, incident_update: IncidentUpdate, use
             }
         )
         
-        # Update service statuses based on incident status
-        if incident_update.status:
-            for service_id in service_ids:
-                service = await db.service.find_unique(where={"id": service_id})
-                if service and service.status != incident_update.status:
-                    await db.service.update(
-                        where={"id": service_id},
-                        data={"status": incident_update.status}
-                    )
-                    # Send notification for service status change
-                    await notification_service.send_service_status_change_notification(
-                        service_id=service_id,
-                        old_status=service.status,
-                        new_status=incident_update.status
-                    )
-    
+       
     # If incident was resolved, send resolved notification
     if incident_update.status and incident_update.status == "resolved" and old_status != "resolved":
         await notification_service.send_incident_resolved_notification(incident_id=incident_id)
