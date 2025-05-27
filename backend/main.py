@@ -826,29 +826,51 @@ async def create_incident_update(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     
-    # Create the update
-    new_update = await db.update.create(
-        data={
-            "message": update.message,
-            "incident": {"connect": {"id": incident_id}},
-            "created_by": user.id,
-        },
-        include={"incident": True}
-    )
-    
-    # Notify WebSocket clients
-    await manager.broadcast({
-        "type": "update_created",
-        "data": {
-            "id": new_update.id,
+    try:
+        # Create the update with the correct field names for Prisma
+        new_update = await db.update.create(
+            data={
+                "message": update.message,
+                "incident": {"connect": {"id": incident_id}},
+                "created_by_user": {"connect": {"id": user.id}}
+            },
+            include={
+                "incident": True,
+                "created_by_user": True
+            }
+        )
+        
+        # Send notification for the new update
+        await notification_service.send_incident_update_notification(
+            update_id=new_update.id,
+            incident_id=incident_id
+        )
+        
+        # Prepare the update data for WebSocket broadcast
+        update_data = {
+            "id": str(new_update.id),
             "message": new_update.message,
-            "created_at": new_update.created_at.isoformat(),
+            "created_at": new_update.created_at.isoformat() if hasattr(new_update, 'created_at') else datetime.now(timezone.utc).isoformat(),
             "incident_id": incident_id,
-            "created_by": user.id
+            "created_by": user.id,
+            "created_by_user": {
+                "id": user.id,
+                "name": getattr(user, 'name', 'Unknown'),
+                "email": getattr(user, 'email', '')
+            }
         }
-    })
-    
-    return new_update
+        
+        # Notify WebSocket clients
+        await manager.broadcast(json.dumps({
+            "type": "update_created",
+            "data": update_data
+        }))
+        
+        return new_update
+        
+    except Exception as e:
+        print(f"Error creating incident update: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create update: {str(e)}")
 
 # Original update endpoint
 @app.post("/updates")
