@@ -46,17 +46,36 @@ app.add_middleware(
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        async with self._lock:
+            self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        async with self._lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
+        disconnected = []
+        
+        async with self._lock:
+            for connection in self.active_connections:
+                try:
+                    await connection.send_text(message)
+                except (WebSocketDisconnect, RuntimeError):
+                    # Mark for removal if connection is closed or has an error
+                    disconnected.append(connection)
+                except Exception as e:
+                    print(f"Error broadcasting message: {e}")
+                    disconnected.append(connection)
+            
+            # Clean up disconnected clients
+            for connection in disconnected:
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
 manager = ConnectionManager()
 
@@ -883,10 +902,27 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep the connection alive
-            await asyncio.sleep(10)
-    except WebSocketDisconnect:
+            try:
+                # Keep the connection alive by receiving messages
+                # We don't actually need to do anything with the messages
+                await websocket.receive_text()
+            except WebSocketDisconnect:
+                # If disconnect happens during receive, break the loop
+                break
+            except RuntimeError as e:
+                if "No response return" in str(e):
+                    # This can happen when the client disconnects unexpectedly
+                    break
+                raise
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        # Ensure we clean up the connection
         manager.disconnect(websocket)
+        try:
+            await websocket.close()
+        except Exception as e:
+            print(f"Error closing WebSocket: {e}")
 
 # Add new routes for user management and notification preferences
 class UserCreate(BaseModel):
