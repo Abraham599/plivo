@@ -82,8 +82,11 @@ manager = ConnectionManager()
 # Initialize Prisma client
 db = Prisma(auto_register=True)
 
-# Initialize Clerk service
-clerk_service = ClerkService()
+# Initialize Clerk SDK
+clerk = Clerk(bearer_auth=os.getenv("CLERK_SECRET_KEY"))
+
+# Initialize Clerk service with the clerk client
+clerk_service = ClerkService(clerk)
 
 # Initialize Uptime Service
 u = UptimeService(db)
@@ -91,12 +94,6 @@ u = UptimeService(db)
 # Initialize Notification Service
 notification_service = NotificationService(db)
 uptime_service = UptimeService(db)
-
-
-# Initialize Clerk SDK
-# Initialize Clerk SDK and service
-clerk = Clerk(bearer_auth=os.getenv("CLERK_SECRET_KEY"))
-clerk_service = ClerkService(clerk)
 
 @app.on_event("startup")
 async def startup():
