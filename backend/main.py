@@ -687,7 +687,7 @@ async def update_service(service_id: str, service_update: ServiceUpdate, user: A
             "status": service.status,
             "description": service.description,
             "endpoint": service.endpoint,
-            "updatedAt": service.updated_at.isoformat() if service.updated_at else None
+            "updatedAt": service.updatedAt.isoformat() if hasattr(service, 'updatedAt') else datetime.now(timezone.utc).isoformat()
         }
     }))
     
@@ -822,7 +822,7 @@ async def create_incident_update(
     user: Annotated[Any, Depends(get_clerk_user)]
 ):
     # Ensure the incident exists
-    incident = await db.incident.find_unique(where={"id": incident_id})
+    incident = await db.incident.find_unique(where={"id": incident_id}, include={"updates": True})
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     
@@ -832,11 +832,9 @@ async def create_incident_update(
             data={
                 "message": update.message,
                 "incident": {"connect": {"id": incident_id}},
-                "created_by_user": {"connect": {"id": user.id}}
             },
             include={
-                "incident": True,
-                "created_by_user": True
+                "incident": True
             }
         )
         
@@ -850,10 +848,9 @@ async def create_incident_update(
         update_data = {
             "id": str(new_update.id),
             "message": new_update.message,
-            "created_at": new_update.created_at.isoformat() if hasattr(new_update, 'created_at') else datetime.now(timezone.utc).isoformat(),
+            "createdAt": new_update.createdAt.isoformat() if hasattr(new_update, 'createdAt') else datetime.now(timezone.utc).isoformat(),
             "incident_id": incident_id,
-            "created_by": user.id,
-            "created_by_user": {
+            "user": {
                 "id": user.id,
                 "name": getattr(user, 'name', 'Unknown'),
                 "email": getattr(user, 'email', '')
