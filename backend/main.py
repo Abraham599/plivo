@@ -783,91 +783,89 @@ async def update_incident(incident_id: str, incident_update: IncidentUpdate, use
     
     old_status = current_incident.status
     
-    # Convert to dict and exclude unset values
-    updated_data = {k: v for k, v in incident_update.model_dump(exclude_unset=True).items()}
-    
-    # Handle service connections separately
-    service_ids = updated_data.pop("service_ids", None)
-    
-    # Update the incident with the new data
-    incident = await db.incident.update(
-        where={"id": incident_id},
-        data=updated_data,
-        include={"services": True, "organization": True}
-    )
-    
-    # Update services if needed
-    if service_ids is not None:
+    try:
+        # Convert to dict and exclude unset values
+        updated_data = {k: v for k, v in incident_update.model_dump(exclude_unset=True).items()}
+        
+        # Handle service connections separately
+        service_ids = updated_data.pop("service_ids", None)
+        
+        # Update the incident with the new data
         incident = await db.incident.update(
             where={"id": incident_id},
-            data={
-                "services": {
-                    "set": [{"id": service_id} for service_id in service_ids]
-                }
-            },
+            data=updated_data,
             include={"services": True, "organization": True}
         )
-    
-    # Handle status changes
-    if incident_update.status and incident_update.status != old_status:
-        # If status changed to resolved, send resolved notification
-        if incident_update.status == "resolved":
-            await notification_service.send_incident_resolved_notification(
-                incident_id=incident_id
-            )
-            
-            # Check if we need to update any service statuses
-            for service in incident.services:
-                # Check if there are any other active incidents for this service
-                active_incidents = await db.incident.count(
-                    where={
-                        "services": {"some": {"id": service.id}},
-                        "status": {"not": "resolved"},
-                        "id": {"not": incident_id}  # Exclude the current incident
+        
+        # Update services if needed
+        if service_ids is not None:
+            incident = await db.incident.update(
+                where={"id": incident_id},
+                data={
+                    "services": {
+                        "set": [{"id": service_id} for service_id in service_ids]
                     }
+                },
+                include={"services": True, "organization": True}
+            )
+        
+        # Handle status changes
+        if incident_update.status and incident_update.status != old_status:
+            # If status changed to resolved, send resolved notification
+            if incident_update.status == "resolved":
+                await notification_service.send_incident_resolved_notification(
+                    incident_id=incident_id
                 )
                 
-                # If no active incidents, set service status to operational
-                if active_incidents == 0:
-                    await db.service.update(
-                        where={"id": service.id},
-                        data={"status": "operational"}
+                # Check if we need to update any service statuses
+                for service in incident.services:
+                    # Check if there are any other active incidents for this service
+                    active_incidents = await db.incident.count(
+                        where={
+                            "services": {"some": {"id": service.id}},
+                            "status": {"not": "resolved"},
+                            "id": {"not": incident_id}  # Exclude the current incident
+                        }
                     )
                     
-                    # Broadcast service status update
-                    await manager.broadcast(json.dumps({
-                        "type": "service_updated",
-                        "data": {
-                            "id": service.id,
-                            "status": "operational",
-                            "updatedAt": datetime.now(timezone.utc).isoformat()
-                        }
-                    }))
-    
-    # Broadcast the incident update
-    await manager.broadcast(json.dumps({
-        "type": "incident_updated",
-        "data": {
-            "id": incident.id,
-            "title": incident.title,
-            "status": incident.status,
-            "updatedAt": incident.updatedAt.isoformat() if hasattr(incident, 'updatedAt') else datetime.now(timezone.utc).isoformat(),
-            "services": [{"id": s.id, "name": s.name} for s in incident.services]
-        }
-    }))
+                    # If no active incidents, set service status to operational
+                    if active_incidents == 0:
+                        await db.service.update(
+                            where={"id": service.id},
+                            data={"status": "operational"}
+                        )
+                        
+                        # Broadcast service status update
+                        await manager.broadcast(json.dumps({
+                            "type": "service_updated",
+                            "data": {
+                                "id": service.id,
+                                "status": "operational",
+                                "updatedAt": datetime.now(timezone.utc).isoformat()
+                            }
+                        }))
+        
+        # Broadcast the incident update
+        await manager.broadcast(json.dumps({
+            "type": "incident_updated",
+            "data": {
+                "id": incident.id,
+                "title": incident.title,
+                "status": incident.status,
+                "updatedAt": incident.updatedAt.isoformat() if hasattr(incident, 'updatedAt') else datetime.now(timezone.utc).isoformat(),
+                "services": [{"id": s.id, "name": s.name} for s in incident.services]
+            }
+        }))
+        
+        return incident
+        
+    except Exception as e:
+        print(f"Error updating incident: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update incident: {str(e)}")
             }
         )
         
-       
-    # If incident was resolved, send resolved notification
-    if incident_update.status and incident_update.status == "resolved" and old_status != "resolved":
-        await notification_service.send_incident_resolved_notification(incident_id=incident_id)
     
-    await manager.broadcast(json.dumps({
-        "type": "incident_updated",
-        "data": {
-            "id": incident.id,
-            "title": incident.title,
             "status": incident.status,
             "service_ids": service_ids
         }
