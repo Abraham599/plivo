@@ -1,8 +1,7 @@
 "use client"
 
 import type React from "react"
-
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
@@ -45,11 +44,12 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
   const [error, setError] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<"24h" | "7d" | "30d">("24h")
 
-  // Generate mock chart data based on time range
-  const generateChartData = (range: "24h" | "7d" | "30d", uptimeValue: number) => {
+  // Generate chart data based on time range and uptime value
+  const generateChartData = useCallback((range: "24h" | "7d" | "30d", uptimeValue: number) => {
     const now = new Date()
     const dataPoints = range === "24h" ? 24 : range === "7d" ? 7 : 30
     const interval = range === "24h" ? "hour" : "day"
+    const baseUptime = uptimeValue || 100 // Default to 100% if no data
 
     return Array.from({ length: dataPoints }, (_, i) => {
       const time = new Date(now)
@@ -59,15 +59,9 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
         time.setDate(time.getDate() - (dataPoints - 1 - i))
       }
 
-      // Generate realistic uptime data with some variation
-      const baseUptime = uptimeValue || 99.5
-      const variation = (Math.random() - 0.5) * 2 // ±1% variation
+      // Use the provided uptime value with minor variation for the chart
+      const variation = (Math.random() - 0.5) * 2 // ±1% variation for visual appeal
       const uptime = Math.max(95, Math.min(100, baseUptime + variation))
-
-      // Generate response time data
-      const baseResponseTime = 150
-      const responseTimeVariation = (Math.random() - 0.5) * 100
-      const responseTime = Math.max(50, baseResponseTime + responseTimeVariation)
 
       return {
         time:
@@ -75,12 +69,12 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
             ? time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
             : time.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
         uptime: Number(uptime.toFixed(2)),
-        responseTime: Math.round(responseTime),
+        responseTime: 0, // Not provided by the API
       }
     })
-  }
+  }, [])
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
     if (!service.id) return
 
     setIsLoading(true)
@@ -113,37 +107,26 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
         uptime24h: data24h?.uptime24h ?? undefined,
         uptime7d: data7d?.uptime7d ?? undefined,
         uptime30d: data30d?.uptime30d ?? undefined,
-        avgResponseTime: 0,
-        checks: [],
-      }
-
-      // Check if we got any valid data
-      if (
-        transformedData.uptime24h === undefined &&
-        transformedData.uptime7d === undefined &&
-        transformedData.uptime30d === undefined
-      ) {
-        throw new Error("Failed to load uptime data. Please try again later.")
+        avgResponseTime: 0, // Not provided by the API
+        checks: [], // Not provided by the API
       }
 
       // Generate chart data based on current time range
-      const currentUptime =
-        timeRange === "24h"
-          ? transformedData.uptime24h
-          : timeRange === "7d"
-            ? transformedData.uptime7d
-            : transformedData.uptime30d
+      const currentUptime = 
+        timeRange === "24h" ? transformedData.uptime24h :
+        timeRange === "7d" ? transformedData.uptime7d :
+        transformedData.uptime30d
 
-      transformedData.chartData = generateChartData(timeRange, currentUptime || 99.5)
+      transformedData.chartData = generateChartData(timeRange, currentUptime ?? 100)
 
       setMetrics(transformedData)
     } catch (err) {
       console.error("Error fetching uptime metrics:", err)
-      setError("Failed to load uptime data")
+      setError(err instanceof Error ? err.message : "Failed to load uptime data")
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [service.id, timeRange, getToken, generateChartData])
 
   useEffect(() => {
     fetchMetrics()
