@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Query, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any, Annotated
 from pydantic import BaseModel, validator
 import asyncio
@@ -1420,7 +1420,12 @@ async def get_service_uptime_metrics(
     service_id: str,
     user: Annotated[Any, Depends(get_clerk_user)],
     period: str = Query("7d", regex="^(24h|7d|30d)$")
-):
+) -> dict:
+    """
+    Get uptime metrics for a service based on incident history
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     """
     Get uptime metrics for a service based on incident history
     """

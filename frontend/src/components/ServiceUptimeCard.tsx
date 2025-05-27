@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { Button } from "@/components/ui/button"
+import { RefreshCw } from 'lucide-react';
 import type { Service, ServiceStatus } from "../stores/serviceStore"
 import { getServiceUptimeMetrics } from "@/lib/api"
 import { useAuth } from "@clerk/clerk-react";
@@ -22,7 +22,13 @@ interface ServiceUptimeCardProps {
 
 export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
   const { getToken } = useAuth();
-  const [metrics, setMetrics] = useState<UptimeMetrics | null>(null);
+  const [metrics, setMetrics] = useState<UptimeMetrics>({ 
+    uptime24h: undefined, 
+    uptime7d: undefined, 
+    uptime30d: undefined, 
+    avgResponseTime: 0, 
+    checks: [] 
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('24h');
@@ -36,24 +42,40 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
     try {
       const token = await getToken();
       if (!token) {
-        throw new Error('Authentication required');
+        throw new Error('Please log in to view uptime metrics');
       }
       
-      // Get metrics for all periods
+      // Get metrics for all periods in parallel
       const [data24h, data7d, data30d] = await Promise.all([
-        getServiceUptimeMetrics(service.id, token, '24h'),
-        getServiceUptimeMetrics(service.id, token, '7d'),
-        getServiceUptimeMetrics(service.id, token, '30d')
+        getServiceUptimeMetrics(service.id, token, '24h').catch(e => {
+          console.error('Error fetching 24h metrics:', e);
+          return { uptime24h: null };
+        }),
+        getServiceUptimeMetrics(service.id, token, '7d').catch(e => {
+          console.error('Error fetching 7d metrics:', e);
+          return { uptime7d: null };
+        }),
+        getServiceUptimeMetrics(service.id, token, '30d').catch(e => {
+          console.error('Error fetching 30d metrics:', e);
+          return { uptime30d: null };
+        })
       ]);
       
       // Transform the response to match the expected format
-      const transformedData = {
-        uptime24h: data24h.uptime24h ?? 100,
-        uptime7d: data7d.uptime7d ?? 100,
-        uptime30d: data30d.uptime30d ?? 100,
+      const transformedData: UptimeMetrics = {
+        uptime24h: data24h?.uptime24h ?? undefined,
+        uptime7d: data7d?.uptime7d ?? undefined,
+        uptime30d: data30d?.uptime30d ?? undefined,
         avgResponseTime: 0,  // Not currently used in the UI
         checks: []  // Not currently used in the UI
       };
+      
+      // Check if we got any valid data
+      if (transformedData.uptime24h === undefined && 
+          transformedData.uptime7d === undefined && 
+          transformedData.uptime30d === undefined) {
+        throw new Error('Failed to load uptime data. Please try again later.');
+      }
       
       setMetrics(transformedData);
     } catch (err) {
@@ -69,10 +91,22 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
   }, [service.id]);
 
   // Calculate uptime percentage based on the selected time range
-  const uptimePercentage = metrics ? 
-    timeRange === '24h' ? metrics.uptime24h :
-    timeRange === '7d' ? metrics.uptime7d :
-    metrics.uptime30d : 100; // Default to 100% if no data
+  const getUptimePercentage = (): number => {
+    const value = timeRange === '24h' 
+      ? metrics.uptime24h 
+      : timeRange === '7d' 
+        ? metrics.uptime7d 
+        : metrics.uptime30d;
+    
+    // If we don't have data for the selected time range, try to show another available range
+    if (value === undefined || value === null) {
+      return metrics.uptime24h ?? metrics.uptime7d ?? metrics.uptime30d ?? 0;
+    }
+    
+    return value;
+  };
+  
+  const uptimePercentage = getUptimePercentage(); // Default to 100% if no data
 
   // Map status to color
   const getStatusColor = (status: ServiceStatus) => {
@@ -101,46 +135,59 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
   };
 
   // Render loading state
-  if (isLoading && !metrics) {
+  if (isLoading) {
     return (
       <Card className="w-full">
-        <CardHeader className="space-y-2 pb-2">
-          <Skeleton className="h-4 w-3/4" />
+        <CardHeader>
+          <CardTitle>Uptime</CardTitle>
         </CardHeader>
-        <CardContent>
-          <Skeleton className="h-8 w-1/2 mb-2" />
-          <Skeleton className="h-2 w-full" />
-          <Skeleton className="h-3 w-1/4 mt-2" />
+        <CardContent className="flex justify-center items-center h-32">
+          <Skeleton className="h-8 w-8 animate-spin text-muted-foreground" />
         </CardContent>
       </Card>
     );
   }
 
-  // Render error state
   if (error) {
     return (
       <Card className="w-full">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">
-            {service.name}
-          </CardTitle>
-          <Badge variant="outline" className="bg-gray-100">
-            Error
-          </Badge>
+        <CardHeader>
+          <CardTitle>Uptime</CardTitle>
         </CardHeader>
         <CardContent>
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription className="text-xs">
-              {error}
-              <button 
-                onClick={handleRefresh}
-                className="ml-2 text-blue-600 hover:underline flex items-center text-xs"
-              >
-                <RefreshCw className="h-3 w-3 mr-1" /> Retry
-              </button>
-            </AlertDescription>
-          </Alert>
+          <div className="text-center text-destructive">
+            <p className="mb-2">{error}</p>
+            <Button 
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              className="inline-flex items-center"
+            >
+              <RefreshCw className="h-3 w-3 mr-1" /> Retry
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+  
+  // If we have no metrics data at all, show a message
+  if (metrics.uptime24h === undefined && metrics.uptime7d === undefined && metrics.uptime30d === undefined) {
+    return (
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle>Uptime</CardTitle>
+        </CardHeader>
+        <CardContent className="text-center py-8">
+          <p className="text-muted-foreground mb-2">No uptime data available</p>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleRefresh}
+            className="inline-flex items-center"
+          >
+            <RefreshCw className="h-3 w-3 mr-1" /> Refresh
+          </Button>
         </CardContent>
       </Card>
     );
