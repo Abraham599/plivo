@@ -53,7 +53,7 @@ class ConnectionManager:
         async with self._lock:
             self.active_connections.append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
         async with self._lock:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
@@ -918,7 +918,7 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"WebSocket error: {e}")
     finally:
         # Ensure we clean up the connection
-        manager.disconnect(websocket)
+        await manager.disconnect(websocket)
         try:
             await websocket.close()
         except Exception as e:
