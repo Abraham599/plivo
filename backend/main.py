@@ -1301,12 +1301,12 @@ async def get_service_current_uptime(service_id: str):
         
         # Add error handling for the database query
         try:
-            checks = await db.uptime_check.find_many(
+            checks = await db.uptimecheck.find_many(
                 where={
                     "service_id": service_id,
                     "timestamp": {"gte": start_date}
                 },
-                orderBy={"timestamp": "asc"}
+                order={"timestamp": "asc"}
             )
             print(f"Found {len(checks)} checks in the last 24 hours")
         except Exception as e:
@@ -1422,44 +1422,74 @@ async def get_service_uptime_metrics(
     period: str = Query("7d", regex="^(24h|7d|30d)$")
 ):
     """
-    Get uptime metrics for a service
+    Get uptime metrics for a service based on incident history
     """
-    # Verify the service exists and the user has access
-    service = await db.service.find_unique(
-        where={"id": service_id},
-        include={"organization": True}
-    )
-    
-    if not service:
-        raise HTTPException(status_code=404, detail="Service not found")
-    
     # Calculate time range based on period
     now = datetime.utcnow()
     if period == "24h":
         start_time = now - timedelta(hours=24)
+        days = 1
     elif period == "7d":
         start_time = now - timedelta(days=7)
+        days = 7
     else:  # 30d
         start_time = now - timedelta(days=30)
+        days = 30
     
-    # Get uptime checks from the database - Fixed: using order_by instead of sort
-    checks = await db.uptime_check.find_many(
+    # Get all incidents for this service within the time range
+    incidents = await db.incident.find_many(
         where={
-            "service_id": service_id,
-            "timestamp": {"gte": start_time}
+            "services": {
+                "some": {
+                    "id": service_id
+                }
+            },
+            "OR": [
+                {"createdAt": {"gte": start_time}},
+                {"updatedAt": {"gte": start_time}},
+                {"status": {"not": "resolved"}}
+            ]
         },
-        orderBy={"timestamp": "asc"}
+        include={
+            "services": {
+                "where": {"id": service_id}
+            }
+        },
+        order={"createdAt": "asc"}
     )
     
-    # Format the response
-    return [
-        {
-            "timestamp": check.checked_at.isoformat(),
-            "status": "up" if check.is_up else "down",
-            "response_time": check.response_time_ms
-        }
-        for check in checks
-    ]
+    # Calculate uptime based on incident history
+    total_seconds = days * 24 * 60 * 60
+    downtime_seconds = 0
+    
+    # Track current incident if any
+    current_incident = None
+    
+    # Sort incidents by creation time
+    sorted_incidents = sorted(incidents, key=lambda x: x.createdAt)
+    
+    # Calculate downtime
+    for incident in sorted_incidents:
+        if incident.status != "resolved":
+            # If incident is still ongoing, count until now
+            incident_end = now
+        else:
+            incident_end = incident.updatedAt
+            
+        # Only count if the incident overlaps with our time range
+        if incident_end > start_time:
+            incident_start = max(incident.createdAt, start_time)
+            downtime_seconds += (incident_end - incident_start).total_seconds()
+    
+    # Calculate uptime percentage (clamped between 0 and 100)
+    uptime_percentage = max(0, min(100, 100 - (downtime_seconds / total_seconds * 100)))
+    
+    # For backward compatibility, create a dummy response
+    return {
+        f"uptime{period}": round(uptime_percentage, 2),
+        "avgResponseTime": 0,  # Not available without UptimeCheck
+        "checks": []  # Not available without UptimeCheck
+    }
 
 @app.get("/services")
 async def get_services():

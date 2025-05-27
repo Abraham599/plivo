@@ -1,14 +1,10 @@
 // Types
 export interface UptimeMetrics {
-  uptime24h: number;
-  uptime7d: number;
-  uptime30d: number;
+  uptime24h?: number;
+  uptime7d?: number;
+  uptime30d?: number;
   avgResponseTime: number;
-  checks: Array<{
-    timestamp: string;
-    status: 'up' | 'down';
-    responseTime: number | null;
-  }>;
+  checks: any[]; // Not used in the new implementation
 }
 
 // Get API URL with fallback
