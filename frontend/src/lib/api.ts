@@ -19,13 +19,17 @@ export const getAuthHeaders = (token?: string | null): HeadersInit => ({
 });
 
 // Uptime metrics API
-export const getServiceUptimeMetrics = async (serviceId: string, token?: string | null): Promise<UptimeMetrics> => {
-  const response = await fetch(
-    `${getApiUrl()}/services/${serviceId}/metrics/uptime`,
-    {
-      headers: getAuthHeaders(token)
-    }
-  );
+export const getServiceUptimeMetrics = async (
+  serviceId: string, 
+  token?: string | null, 
+  period: '24h' | '7d' | '30d' = '7d'
+): Promise<UptimeMetrics> => {
+  const url = new URL(`${getApiUrl()}/services/${serviceId}/metrics/uptime`);
+  url.searchParams.append('period', period);
+  
+  const response = await fetch(url.toString(), {
+    headers: getAuthHeaders(token)
+  });
   
   if (!response.ok) {
     throw new Error('Failed to fetch uptime metrics');

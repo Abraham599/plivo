@@ -35,15 +35,24 @@ export function ServiceUptimeCard({ service }: ServiceUptimeCardProps) {
     
     try {
       const token = await getToken();
-      const data = await getServiceUptimeMetrics(service.id, token);
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
+      // Get metrics for all periods
+      const [data24h, data7d, data30d] = await Promise.all([
+        getServiceUptimeMetrics(service.id, token, '24h'),
+        getServiceUptimeMetrics(service.id, token, '7d'),
+        getServiceUptimeMetrics(service.id, token, '30d')
+      ]);
       
       // Transform the response to match the expected format
       const transformedData = {
-        uptime24h: data.uptime24h || 100, // Default to 100% if no data
-        uptime7d: data.uptime7d || 100,
-        uptime30d: data.uptime30d || 100,
-        avgResponseTime: 0,
-        checks: []
+        uptime24h: data24h.uptime24h ?? 100,
+        uptime7d: data7d.uptime7d ?? 100,
+        uptime30d: data30d.uptime30d ?? 100,
+        avgResponseTime: 0,  // Not currently used in the UI
+        checks: []  // Not currently used in the UI
       };
       
       setMetrics(transformedData);
