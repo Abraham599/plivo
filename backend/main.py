@@ -840,8 +840,7 @@ async def create_incident_update(
         
         # Send notification for the new update
         await notification_service.send_incident_update_notification(
-            update_id=new_update.id,
-            incident_id=incident_id
+            update_id=new_update.id
         )
         
         # Prepare the update data for WebSocket broadcast

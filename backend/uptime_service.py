@@ -48,13 +48,7 @@ class UptimeService:
                     }
                 )
                 
-                # Update service status if needed
-                if not status and service.status == "operational":
-                    await self.db.service.update(
-                        where={"id": service.id},
-                        data={"status": "partial_outage"}
-                    )
-                elif status and service.status != "operational":
+               if status and service.status != "operational":
                     # Only auto-update to operational if there are no active incidents
                     active_incidents = await self.db.incident.count(
                         where={
