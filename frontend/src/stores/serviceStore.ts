@@ -156,7 +156,7 @@ export const useServiceStore = create<ServiceStore>((set) => ({
 
   updateService: async (id, updates) => {
     try {
-      const response = await fetch(`${API_URL}/api/services/${id}`, {
+      const response = await fetch(`${API_URL}/services/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

@@ -247,6 +247,15 @@ class ServiceUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     endpoint: Optional[str] = None
+    
+    @validator('status')
+    def validate_status(cls, v):
+        if v is None:
+            return v
+        allowed_statuses = ["operational", "degraded", "partial_outage", "major_outage", "maintenance"]
+        if v not in allowed_statuses:
+            raise ValueError(f"Status must be one of {', '.join(allowed_statuses)}")
+        return v
 
 class IncidentCreate(BaseModel):
     title: str
