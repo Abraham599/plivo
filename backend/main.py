@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 # Change this import
 from prisma import Prisma
+from prisma.models import Incident
 from notification_service import NotificationService
 from uptime_service import UptimeService
 
@@ -692,7 +693,7 @@ async def delete_service(service_id: str, user: Annotated[Any, Depends(get_clerk
     return {"message": "Service deleted"}
 
 # Incident routes
-@app.post("/incidents/", response_model=Incident)
+@app.post("/incidents/", response_model=dict)
 async def create_incident(incident: IncidentCreate, user: Annotated[Any, Depends(get_clerk_user)]):
     # Create the incident
     try:
@@ -1045,23 +1046,6 @@ async def get_notification_preferences(
     
     if not user_from_db.notificationPreferences:
         # This implies that notification preferences were not created with the user or were deleted.
-        # Frontend has defaults, so a 404 is appropriate to let client use its defaults.
-        raise HTTPException(status_code=404, detail="Notification preferences not found for user.")
-
-    return NotificationPreferenceResponse(
-        serviceStatusChanges=user_from_db.notificationPreferences.serviceStatusChanges,
-        newIncidents=user_from_db.notificationPreferences.newIncidents,
-        incidentUpdates=user_from_db.notificationPreferences.incidentUpdates,
-        incidentResolved=user_from_db.notificationPreferences.incidentResolved,
-    )
-
-
-@app.put("/users/me/notification-preferences", response_model=NotificationPreferenceResponse)
-async def update_notification_preferences(
-    notification_preferences: NotificationPreferenceUpdate,
-    current_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
-):
-    user_from_db = await db.user.find_unique(
         where={"clerk_user_id": current_user_payload.id},
         include={"notificationPreferences": True}
     )
