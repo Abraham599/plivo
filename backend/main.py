@@ -1301,12 +1301,12 @@ async def get_service_current_uptime(service_id: str):
         
         # Add error handling for the database query
         try:
-            checks = await db.uptimecheck.find_many(
+            checks = await db.uptime_check.find_many(
                 where={
                     "service_id": service_id,
                     "timestamp": {"gte": start_date}
                 },
-                order={"timestamp": "asc"}
+                orderBy={"timestamp": "asc"}
             )
             print(f"Found {len(checks)} checks in the last 24 hours")
         except Exception as e:
@@ -1443,7 +1443,7 @@ async def get_service_uptime_metrics(
         start_time = now - timedelta(days=30)
     
     # Get uptime checks from the database - Fixed: using order_by instead of sort
-    checks = await db.uptimecheck.find_many(
+    checks = await db.uptime_check.find_many(
         where={
             "service_id": service_id,
             "timestamp": {"gte": start_time}
