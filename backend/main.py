@@ -82,7 +82,13 @@ manager = ConnectionManager()
 # Initialize Prisma client
 db = Prisma(auto_register=True)
 
-# Initialize services after Prisma client
+# Initialize Clerk service
+clerk_service = ClerkService()
+
+# Initialize Uptime Service
+u = UptimeService(db)
+
+# Initialize Notification Service
 notification_service = NotificationService(db)
 uptime_service = UptimeService(db)
 
@@ -94,35 +100,21 @@ clerk_service = ClerkService(clerk)
 
 @app.on_event("startup")
 async def startup():
-    # Try to fetch Prisma binaries if needed
     try:
-        subprocess.run(["prisma", "py", "fetch"], check=True)
-        print("✅ Prisma binaries fetched successfully")
-    except Exception as e:
-        print(f"⚠️ Warning: Failed to fetch Prisma binaries: {e}")
-    
-    # Try to generate Prisma client if needed
-    try:
-        subprocess.run(["prisma", "generate"], check=True)
-        print("✅ Prisma client generated successfully")
-    except Exception as e:
-        print(f"⚠️ Warning: Failed to generate Prisma client: {e}")
-    
-    # Connect to the database
-    try:
+        # Connect to the database
         await db.connect()
         print("✅ Connected to database successfully")
-    except Exception as e:
-        print(f"❌ Error connecting to database: {e}")
-        # Don't exit here, just log the error
-        # sys.exit(1)
-    
-    # Start uptime monitoring in the background
-    try:
-        asyncio.create_task(uptime_service.start_monitoring())
+        
+        # Start the uptime monitoring service
+        asyncio.create_task(u.start_monitoring())
         print("✅ Started uptime monitoring")
+        
+        # Initialize notification service
+        print("✅ Notification service initialized")
+        
     except Exception as e:
-        print(f"⚠️ Warning: Failed to start uptime monitoring: {e}")
+        print(f"⚠️ Error during startup: {e}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -703,36 +695,57 @@ async def delete_service(service_id: str, user: Annotated[Any, Depends(get_clerk
     return {"message": "Service deleted"}
 
 # Incident routes
-@app.post("/incidents")
+@app.post("/incidents/", response_model=Incident)
 async def create_incident(incident: IncidentCreate, user: Annotated[Any, Depends(get_clerk_user)]):
-    created_incident = await db.incident.create(
-        data={
-            "title": incident.title,
-            "description": incident.description,
-            "status": incident.status,
-            "services": {
-                "connect": [{"id": service_id} for service_id in incident.service_ids]
-            },
-            "organization": {
-                "connect": {"id": incident.organization_id}
+    # Create the incident
+    try:
+        # First, create the incident without services to get an ID
+        created_incident = await db.incident.create(
+            data={
+                "title": incident.title,
+                "description": incident.description,
+                "status": incident.status,
+                "organization": {"connect": {"id": incident.organization_id}},
             }
-        }
-    )
-    
-    
-    # Send notification for new incident
-    await notification_service.send_new_incident_notification(incident_id=created_incident.id)
-    
-    await manager.broadcast(json.dumps({
-        "type": "incident_created",
-        "data": {
-            "id": created_incident.id,
-            "title": created_incident.title,
-            "status": created_incident.status,
-            "service_ids": incident.service_ids
-        }
-    }))
-    return created_incident
+        )
+        
+        # Then connect the services
+        if incident.service_ids:
+            await db.incident.update(
+                where={"id": created_incident.id},
+                data={
+                    "services": {
+                        "connect": [{"id": service_id} for service_id in incident.service_ids]
+                    }
+                }
+            )
+        
+        # Get the full incident with services for the response
+        result = await db.incident.find_unique(
+            where={"id": created_incident.id},
+            include={"services": True, "organization": True}
+        )
+        
+        # Send new incident notification
+        await notification_service.send_new_incident_notification(incident_id=result.id)
+        
+        # Broadcast the new incident
+        await manager.broadcast(json.dumps({
+            "type": "incident_created",
+            "data": {
+                "id": result.id,
+                "title": result.title,
+                "status": result.status,
+                "createdAt": result.createdAt.isoformat() if hasattr(result, 'createdAt') else datetime.now(timezone.utc).isoformat(),
+                "services": [{"id": s.id, "name": s.name} for s in result.services]
+            }
+        }))
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error creating incident: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create incident: {str(e)}")
 
 @app.get("/incidents")
 async def get_incidents(organization_id: Optional[str] = None, status: Optional[str] = None):
@@ -760,32 +773,88 @@ async def get_incident(incident_id: str):
 
 @app.put("/incidents/{incident_id}")
 async def update_incident(incident_id: str, incident_update: IncidentUpdate, user: Annotated[Any, Depends(get_clerk_user)]):
-    # Convert to dict and exclude unset values
-    updated_data = {k: v for k, v in incident_update.model_dump().items() if v is not None}
-    
-    # Handle service connections separately
-    service_ids = updated_data.pop("service_ids", None)
-    
-    # Get current incident status
-    current_incident = await db.incident.find_unique(where={"id": incident_id})
+    # Get the current incident with services and organization
+    current_incident = await db.incident.find_unique(
+        where={"id": incident_id},
+        include={"services": True, "organization": True}
+    )
     if not current_incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     
     old_status = current_incident.status
     
+    # Convert to dict and exclude unset values
+    updated_data = {k: v for k, v in incident_update.model_dump(exclude_unset=True).items()}
+    
+    # Handle service connections separately
+    service_ids = updated_data.pop("service_ids", None)
+    
+    # Update the incident with the new data
     incident = await db.incident.update(
         where={"id": incident_id},
-        data=updated_data
+        data=updated_data,
+        include={"services": True, "organization": True}
     )
     
-    if service_ids:
-        # Update the services connected to this incident
-        await db.incident.update(
+    # Update services if needed
+    if service_ids is not None:
+        incident = await db.incident.update(
             where={"id": incident_id},
             data={
                 "services": {
                     "set": [{"id": service_id} for service_id in service_ids]
                 }
+            },
+            include={"services": True, "organization": True}
+        )
+    
+    # Handle status changes
+    if incident_update.status and incident_update.status != old_status:
+        # If status changed to resolved, send resolved notification
+        if incident_update.status == "resolved":
+            await notification_service.send_incident_resolved_notification(
+                incident_id=incident_id
+            )
+            
+            # Check if we need to update any service statuses
+            for service in incident.services:
+                # Check if there are any other active incidents for this service
+                active_incidents = await db.incident.count(
+                    where={
+                        "services": {"some": {"id": service.id}},
+                        "status": {"not": "resolved"},
+                        "id": {"not": incident_id}  # Exclude the current incident
+                    }
+                )
+                
+                # If no active incidents, set service status to operational
+                if active_incidents == 0:
+                    await db.service.update(
+                        where={"id": service.id},
+                        data={"status": "operational"}
+                    )
+                    
+                    # Broadcast service status update
+                    await manager.broadcast(json.dumps({
+                        "type": "service_updated",
+                        "data": {
+                            "id": service.id,
+                            "status": "operational",
+                            "updatedAt": datetime.now(timezone.utc).isoformat()
+                        }
+                    }))
+    
+    # Broadcast the incident update
+    await manager.broadcast(json.dumps({
+        "type": "incident_updated",
+        "data": {
+            "id": incident.id,
+            "title": incident.title,
+            "status": incident.status,
+            "updatedAt": incident.updatedAt.isoformat() if hasattr(incident, 'updatedAt') else datetime.now(timezone.utc).isoformat(),
+            "services": [{"id": s.id, "name": s.name} for s in incident.services]
+        }
+    }))
             }
         )
         
@@ -822,7 +891,10 @@ async def create_incident_update(
     user: Annotated[Any, Depends(get_clerk_user)]
 ):
     # Ensure the incident exists
-    incident = await db.incident.find_unique(where={"id": incident_id}, include={"updates": True})
+    incident = await db.incident.find_unique(
+        where={"id": incident_id}, 
+        include={"updates": True, "organization": True}
+    )
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     
@@ -842,6 +914,12 @@ async def create_incident_update(
         await notification_service.send_incident_update_notification(
             update_id=new_update.id
         )
+        
+        # If this is a resolution update, send resolved notification
+        if update.message.lower().startswith("resolved"):
+            await notification_service.send_incident_resolved_notification(
+                incident_id=incident_id
+            )
         
         # Prepare the update data for WebSocket broadcast
         update_data = {
