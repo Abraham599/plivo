@@ -862,15 +862,6 @@ async def update_incident(incident_id: str, incident_update: IncidentUpdate, use
     except Exception as e:
         print(f"Error updating incident: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update incident: {str(e)}")
-            }
-        )
-        
-    
-            "status": incident.status,
-            "service_ids": service_ids
-        }
-    }))
-    return incident
 
 @app.delete("/incidents/{incident_id}")
 async def delete_incident(incident_id: str, user: Annotated[Any, Depends(get_clerk_user)]):
