@@ -1048,7 +1048,7 @@ async def get_notification_preferences(
         # This implies that notification preferences were not created with the user or were deleted.
         where={"clerk_user_id": current_user_payload.id},
         include={"notificationPreferences": True}
-    )
+    
     
     if not user_from_db:
         raise HTTPException(status_code=404, detail="User not found in local database.")
