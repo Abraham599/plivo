@@ -1301,7 +1301,7 @@ async def get_service_current_uptime(service_id: str):
         
         # Add error handling for the database query
         try:
-            checks = await db.uptimeCheck.find_many(
+            checks = await db.uptimecheck.find_many(
                 where={
                     "service_id": service_id,
                     "timestamp": {"gte": start_date}
@@ -1443,7 +1443,7 @@ async def get_service_uptime_metrics(
         start_time = now - timedelta(days=30)
     
     # Get uptime checks from the database
-    checks = await db.uptimeCheck.find_many(
+    checks = await db.uptimecheck.find_many(
         where={
             "service_id": service_id,
             "checked_at": {"gte": start_time}
