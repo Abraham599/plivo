@@ -1448,7 +1448,7 @@ async def get_service_uptime_metrics(
             "service_id": service_id,
             "timestamp": {"gte": start_time}
         },
-        order_by={"timestamp": "asc"}
+        orderBy={"timestamp": "asc"}
     )
     
     # Format the response
