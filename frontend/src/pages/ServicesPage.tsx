@@ -3,37 +3,91 @@ import { useAuth } from "@clerk/clerk-react";
 import { useServiceStore, type Service } from "../stores/serviceStore";
 
 type ServiceStatus = "operational" | "degraded" | "partial_outage" | "major_outage" | "maintenance";
-import { useOrganizationStore } from "../stores/organizationStore"; // Added import
+import { useOrganizationStore } from "../stores/organizationStore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreVertical, Edit, Trash, BarChart2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { MoreVertical, Edit, Trash, BarChart2, Check, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { UptimeMetrics } from "@/components/UptimeMetrics";
 
+const statusOptions = [
+  { value: "operational", label: "Operational" },
+  { value: "degraded", label: "Degraded Performance" },
+  { value: "partial_outage", label: "Partial Outage" },
+  { value: "major_outage", label: "Major Outage" },
+  { value: "maintenance", label: "Maintenance" },
+] as const;
+
+// Helper to get status color
+const getStatusColor = (status: ServiceStatus): string => {
+  switch (status) {
+    case "operational": return "bg-green-500";
+    case "degraded": return "bg-yellow-500";
+    case "partial_outage": return "bg-orange-500";
+    case "major_outage": return "bg-red-500";
+    case "maintenance": return "bg-blue-500";
+    default: return "bg-gray-500";
+  }
+};
+
 // Helper to format status display names
 const formatStatusDisplayName = (status: ServiceStatus): string => {
-  switch (status) {
-    case "operational": return "Operational";
-    case "degraded": return "Degraded Performance";
-    case "partial_outage": return "Partial Outage";
-    case "major_outage": return "Major Outage";
-    case "maintenance": return "Maintenance";
-    default:
-      // This should not happen with proper typing, but as a fallback:
-      const exhaustiveCheck: never = status;
-      return exhaustiveCheck;
-  }
+  const option = statusOptions.find(opt => opt.value === status);
+  return option ? option.label : status;
+};
+
+// Status dropdown component
+const StatusDropdown = ({
+  status,
+  onStatusChange,
+  className = "",
+}: {
+  status: ServiceStatus;
+  onStatusChange: (status: ServiceStatus) => void;
+  className?: string;
+}) => {
+  console.log("StatusDropdown", status)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className={`flex items-center gap-2 ${className}`}>
+          <div className={`w-3 h-3 rounded-full ${getStatusColor(status)}`} />
+          <span>{formatStatusDisplayName(status)}</span>
+          <ChevronDown className="h-4 w-4 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        {statusOptions.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            onSelect={() => onStatusChange(option.value as ServiceStatus)}
+            className="flex items-center gap-2"
+          >
+            <div className={`w-3 h-3 rounded-full ${getStatusColor(option.value as ServiceStatus)}`} />
+            <span>{option.label}</span>
+            {status === option.value && <Check className="h-4 w-4 ml-auto" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 };
 
 export default function ServicesPage() {
@@ -138,12 +192,15 @@ export default function ServicesPage() {
     }
 
     try {
-      await updateService(editingService.id, {
-        name: editServiceName,
-        description: editServiceDescription,
-        status: editServiceStatus, // editServiceStatus is now ServiceStatus
-        url: editServiceEndpoint,
-      });
+      await updateService(
+        editingService.id,
+        {
+          name: editServiceName,
+          description: editServiceDescription,
+          status: editServiceStatus,
+          url: editServiceEndpoint,
+        }
+      );
       setIsEditDialogOpen(false);
       toast.success("Service updated successfully");
     } catch (error) {
@@ -173,20 +230,7 @@ export default function ServicesPage() {
     setIsMetricsDialogOpen(true);
   };
 
-  // Use ServiceStatus for the status parameter
-  const getStatusColor = (status: ServiceStatus) => {
-    switch (status) {
-      case "operational": return "bg-green-500";
-      case "degraded": return "bg-yellow-500";
-      case "partial_outage": return "bg-orange-500";
-      case "major_outage": return "bg-red-500";
-      case "maintenance": return "bg-blue-500";
-      default:
-        // This should not be reached if status is strictly ServiceStatus
-        const exhaustiveCheck: never = status;
-        return exhaustiveCheck; // Or a fallback like "bg-gray-500"
-    }
-  };
+  // Status color helper is already defined at the top of the file
 
   return (
     <div className="space-y-6">
@@ -224,12 +268,27 @@ export default function ServicesPage() {
                     )}
                   </div>
                   <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
-                      <div className={`w-3 h-3 rounded-full ${getStatusColor(service.status)}`} />
-                      <span className="text-sm font-medium">
-                        {formatStatusDisplayName(service.status)}
-                      </span>
-                    </div>
+                    <StatusDropdown
+                      status={service.status}
+                      onStatusChange={async (newStatus) => {
+                        try {
+                          const token = await getToken();
+                          if (!token) {
+                            toast.error("Authentication required");
+                            return;
+                          }
+                          await updateService(
+                            service.id,
+                            { status: newStatus }
+                          );
+                          toast.success("Status updated successfully");
+                        } catch (error) {
+                          console.error("Error updating status:", error);
+                          toast.error("Failed to update status");
+                        }
+                      }}
+                      className="text-sm"
+                    />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="sm">
@@ -354,23 +413,12 @@ export default function ServicesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-status">Status</Label>
-                <Select
-                  value={editServiceStatus} // editServiceStatus is ServiceStatus
-                  // Cast the string value from Select to ServiceStatus
-                  onValueChange={(value) => setEditServiceStatus(value as ServiceStatus)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="operational">Operational</SelectItem>
-                    <SelectItem value="degraded">Degraded Performance</SelectItem>
-                    <SelectItem value="partial_outage">Partial Outage</SelectItem>
-                    <SelectItem value="major_outage">Major Outage</SelectItem>
-                    <SelectItem value="maintenance">Maintenance</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Status</Label>
+                <StatusDropdown
+                  status={editServiceStatus}
+                  onStatusChange={(status) => setEditServiceStatus(status)}
+                  className="w-full justify-start"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-endpoint">Monitoring URL (optional)</Label>

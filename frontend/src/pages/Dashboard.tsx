@@ -9,59 +9,51 @@ import type { Organization } from "../api/userApi" // Ensure this type matches b
 import { useAuth } from "@clerk/clerk-react"
 import { format } from "date-fns"
 import { formatServiceStatusDisplayName, formatIncidentStatusDisplayName } from "../lib/format"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ServiceUptimeCard } from "../components/ServiceUptimeCard"
 import { Button } from "@/components/ui/button"
-import { MoreVertical, ArrowUpDown, Clock, AlertCircle, MessageSquare, Check, Pencil, Bell, Loader2, Plus } from "lucide-react";
+import { Pencil,  ArrowUpDown, Clock, AlertCircle, MessageSquare, Check, Bell, Loader2, Plus } from "lucide-react"
 import { ServiceEditModal } from "../components/ServiceEditModal";
 import { IncidentUpdateModal } from "../components/IncidentUpdateModal";
+import { IncidentEditModal } from "../components/IncidentEditModal";
 import { DashboardSettings } from "../components/DashboardSettings"
 import { OrganizationSelector } from "../components/OrganizationSelector"
 import { IncidentModal } from "../components/IncidentModal"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 
 export default function Dashboard() {
-  const { isLoaded: authIsLoaded, getToken } = useAuth(); // getToken from useAuth
+  const { isLoaded: authIsLoaded, getToken } = useAuth();
   const [services, setServices] = useState<Service[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
   const [isPageLoading, setIsPageLoading] = useState(true);
-  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  // Consolidated useEffect for data loading
   useEffect(() => {
     const loadAllData = async () => {
       if (!authIsLoaded) {
-        // console.log("Auth not loaded yet, skipping data load.");
         return;
       }
       const token = await getToken();
       if (!token) {
-        // console.log("Token not available yet, skipping data load.");
-        // If token is essential for initial load, consider setting isPageLoading to false
-        // or showing an error/login prompt if it remains unavailable.
-        // For now, we let fetchData handle its own loading state if it proceeds.
-        setIsPageLoading(false); // No token, can't fetch, stop loading.
+        setIsPageLoading(false);
         return;
       }
-      // fetchData will set isPageLoading true at its start.
       await fetchData(selectedOrganization?.id, token);
     };
 
     loadAllData();
-  }, [authIsLoaded, getToken, selectedOrganization]); // Dependencies
+  }, [authIsLoaded, getToken, selectedOrganization]);
 
   const fetchData = async (organizationId?: string | null, token?: string | null): Promise<void> => {
-    setIsPageLoading(true); // Set loading true at the beginning of any fetch attempt
+    setIsPageLoading(true);
     try {
       const headers = getAuthHeaders(token);
       
-      // Fetch services
       const servicesResponse = await fetch(
         `${getApiUrl()}/services${organizationId ? `?organization_id=${organizationId}` : ''}`, 
         { headers }
@@ -70,7 +62,6 @@ export default function Dashboard() {
       const servicesData = await servicesResponse.json();
       setServices(servicesData);
 
-      // Fetch incidents
       const incidentsResponse = await fetch(
         `${getApiUrl()}/incidents${organizationId ? `?organization_id=${organizationId}` : ''}`,
         { headers }
@@ -79,12 +70,11 @@ export default function Dashboard() {
       const incidentsData = await incidentsResponse.json();
       setIncidents(incidentsData);
 
-      // Fetch organizations with cache-busting
       const orgsResponse = await fetch(
         `${getApiUrl()}/organizations?t=${new Date().getTime()}`,
         { 
           headers,
-          cache: 'no-store' // Prevent caching
+          cache: 'no-store'
         }
       );
       
@@ -95,13 +85,9 @@ export default function Dashboard() {
       }
       
       const orgsData = await orgsResponse.json();
-      console.log("Fetched organizations data:", orgsData);
-      
-      // Ensure we have valid organization data
       const validOrgs = Array.isArray(orgsData) ? orgsData : [];
       setOrganizations(validOrgs);
       
-      // Only update selected organization on initial load or if current selection is invalid
       if (isInitialLoad || !selectedOrganization || !validOrgs.some(org => org.id === selectedOrganization?.id)) {
         if (validOrgs.length > 0) {
           setSelectedOrganization(validOrgs[0]);
@@ -116,29 +102,58 @@ export default function Dashboard() {
       console.error("Error fetching data:", error);
       toast.error("Failed to load data. " + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
-      // Always set loading to false when done, whether successful or not
       setIsPageLoading(false);
     }
   };
+console.log(services);
+  // const updateServiceStatus = async (serviceId: string, newStatusDisplayName: string): Promise<void> => {
+  //   try {
+  //     const token = await getToken();
+  //     if (!token) {
+  //       toast.error('Authentication required');
+  //       throw new Error('Authentication required');
+  //     }
+      
+  //     const statusMapToBackend: Record<string, ServiceStatus> = {
+  //       'Operational': 'operational',
+  //       'Degraded Performance': 'degraded',
+  //       'Partial Outage': 'partial_outage',
+  //       'Major Outage': 'major_outage',
+  //       'Maintenance': 'maintenance'
+  //     };
+      
+  //     const backendStatus = statusMapToBackend[newStatusDisplayName];
 
-  // Function to update service status - used in dropdown menu
-  const updateServiceStatus = async (serviceId: string, newStatus: string): Promise<void> => {
-    const token = await getToken();
-    const response = await fetch(`${getApiUrl()}/services/${serviceId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ status: newStatus.toLowerCase().replace(/ /g, "_") }),
-    });
-    if (!response.ok) throw new Error('Failed to update service');
-    // No need to return response.json() if type is void.
-    // Refetch data to update UI consistently
-    if (token) await fetchData(selectedOrganization?.id, token);
-  };
+  //     if (!backendStatus) {
+  //       const errorMessage = `Invalid status: ${newStatusDisplayName}`;
+  //       console.error(errorMessage);
+  //       toast.error(errorMessage);
+  //       throw new Error(errorMessage);
+  //     }
+      
+  //     const response = await fetch(`${getApiUrl()}/services/${serviceId}`, {
+  //       method: 'PUT',
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //         'Authorization': `Bearer ${token}`,
+  //       },
+  //       body: JSON.stringify({ status: backendStatus }),
+  //     });
+      
+  //     if (!response.ok) {
+  //       const errorData = await response.json().catch(() => ({ detail: 'Failed to update service status' }));
+  //       throw new Error(errorData.detail || 'Failed to update service status');
+  //     }
+      
+  //     await fetchData(selectedOrganization?.id, token);
+  //     // Success toast is now handled by the caller (DropdownMenuItem) for better context
+  //   } catch (error) {
+  //     console.error('Error updating service status:', error);
+  //     toast.error(error instanceof Error ? error.message : 'Failed to update service status');
+  //     throw error; // Re-throw for the caller
+  //   }
+  // };
 
-  // Function to update incident
   const updateIncident = async (incidentId: string, updates: Partial<Incident>): Promise<Incident> => {
     const token = await getToken();
     const response = await fetch(`${getApiUrl()}/incidents/${incidentId}`, {
@@ -151,7 +166,6 @@ export default function Dashboard() {
     });
     if (!response.ok) throw new Error('Failed to update incident');
     const updatedIncident = await response.json();
-    // Refetch data to update UI consistently
     if (token) await fetchData(selectedOrganization?.id, token);
     return updatedIncident;
   };
@@ -160,9 +174,10 @@ export default function Dashboard() {
   const [sortBy, setSortBy] = useState<'name' | 'status'>('name');
   const [showIncidentModal, setShowIncidentModal] = useState(false);
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
-  const [selectedServiceForIncident, setSelectedServiceForIncident] = useState<string | undefined>(undefined);
+  const [selectedServiceForIncident, ] = useState<string | undefined>(undefined);
   const [selectedServiceForEdit, setSelectedServiceForEdit] = useState<Service | null>(null);
   const [isServiceEditModalOpen, setIsServiceEditModalOpen] = useState(false);
+  const [selectedIncidentForEdit, setSelectedIncidentForEdit] = useState<Incident | null>(null);
 
   const handleCreateService = async (serviceData: { name: string; description?: string; endpoint?: string }) => {
     try {
@@ -198,9 +213,7 @@ export default function Dashboard() {
 
       const createdService = await response.json();
       toast.success(`Service "${createdService.name}" created successfully`);
-      
-      await fetchData(selectedOrganization.id, token); // Refresh data
-      
+      await fetchData(selectedOrganization.id, token);
       return createdService;
     } catch (error) {
       console.error('Error creating service:', error);
@@ -219,10 +232,8 @@ export default function Dashboard() {
         return;
       }
       
-      // Update UI optimistically
       setSelectedOrganization(organization);
       
-      // Switch organization in backend
       const response = await fetch(`${getApiUrl()}/organizations/switch`, {
         method: 'POST',
         headers: {
@@ -233,7 +244,6 @@ export default function Dashboard() {
       });
       
       if (!response.ok) {
-        // Revert UI on error
         const currentOrg = organizations.find(org => org.id === selectedOrganization?.id);
         setSelectedOrganization(currentOrg || null);
         
@@ -242,7 +252,6 @@ export default function Dashboard() {
         throw new Error('Failed to switch organization in backend');
       }
       
-      // Refresh data for the new organization
       await fetchData(organization.id, token);
       toast.success(`Switched to ${organization.name}`);
     } catch (error) {
@@ -282,8 +291,6 @@ export default function Dashboard() {
         return "bg-gray-500"; 
     }
   };
-
-  const servicesWithUrls = services.filter((service): service is Service & { url: string } => !!service.url);
 
   if (!authIsLoaded && isPageLoading) { 
     return (
@@ -389,7 +396,7 @@ export default function Dashboard() {
                 if (!selectedServiceForEdit?.id) return; 
 
                 const response = await fetch(`${getApiUrl()}/services/${selectedServiceForEdit.id}`, {
-                    method: 'PATCH', 
+                    method: 'PUT', 
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
@@ -414,15 +421,23 @@ export default function Dashboard() {
       )}
       
     
-      <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>Services Status ({services.length})</CardTitle>
+      <Tabs defaultValue="overview" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="metrics">Metrics</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="overview" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>Services Status ({services.length})</CardTitle>
             <Button
               variant="ghost"
               size="sm"
               className="h-8 w-8 p-0"
               onClick={() => setSortBy(sortBy === 'name' ? 'status' : 'name')}
+              aria-label={sortBy === 'name' ? "Sort by status" : "Sort by name"}
             >
               <ArrowUpDown className="h-4 w-4" />
             </Button>
@@ -455,105 +470,45 @@ export default function Dashboard() {
                           {formatServiceStatusDisplayName(service.status)}
                         </span>
                       </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button 
-                            variant="ghost" 
-                            className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                            <span className="sr-only">More options</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent 
-                          align="end" 
-                          className="z-50 min-w-[200px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg overflow-hidden"
+                      <div className="flex space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
+                          onClick={() => {
+                            setSelectedServiceForEdit(service);
+                            setIsServiceEditModalOpen(true);
+                          }}
+                          aria-label="Edit service"
                         >
-                          {[
-                            'Operational',
-                            'Degraded Performance',
-                            'Partial Outage',
-                            'Major Outage',
-                            'Maintenance'
-                          ].map((statusDisplayName) => (
-                            <DropdownMenuItem
-                              key={statusDisplayName}
-                              onClick={async () => {
-                                try {
-                                  type StatusDisplayMap = {
-                                    [key in ServiceStatus]: string;
-                                  };
-                                  
-                                  const statusMap: StatusDisplayMap = {
-                                    'operational': 'Operational',
-                                    'degraded': 'Degraded Performance',
-                                    'partial_outage': 'Partial Outage',
-                                    'major_outage': 'Major Outage',
-                                    'maintenance': 'Maintenance'
-                                  };
-                                  
-                                  const statusKey = (Object.entries(statusMap) as [ServiceStatus, string][]).find(
-                                    ([_, displayName]) => displayName === statusDisplayName
-                                  )?.[0];
-
-                                  if (statusKey) {
-                                    await updateServiceStatus(service.id, statusKey);
-                                    toast.success(`Updated ${service.name} status to ${statusDisplayName}`);
-                                  } else {
-                                    toast.error(`Invalid status key for ${statusDisplayName}`);
-                                  }
-                                } catch (error) {
-                                  toast.error(`Failed to update ${service.name} status`);
-                                }
-                              }}
-                            >
-                              {statusDisplayName}
-                            </DropdownMenuItem>
-                          ))}
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedServiceForEdit(service);
-                              setIsServiceEditModalOpen(true);
-                            }}
-                          >
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Edit Service
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              if (!selectedOrganization) {
-                                  toast.error("Please select an organization first.");
-                                  return;
-                              }
-                              setSelectedServiceForIncident(service.id);
-                              setShowIncidentModal(true);
-                            }}
-                            className="text-red-600 dark:text-red-400"
-                            disabled={!selectedOrganization}
-                          >
-                            <AlertCircle className="mr-2 h-4 w-4" />
-                            Report Incident
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        
+                      </div>
                     </div>
                   </div>
                 ))
             )}
           </div>
         </CardContent>
-      </Card>
-
-      {servicesWithUrls.length > 0 && (
-        <div>
-          <h2 className="text-xl font-semibold mb-4">Uptime Metrics</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {servicesWithUrls.map((service) => (
-              <ServiceUptimeCard key={service.id} service={service} />
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="metrics" className="space-y-6">
+          <h2 className="text-xl font-semibold mb-4">Service Uptime Metrics</h2>
+          <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
+            {services.map((service) => (
+              <ServiceUptimeCard 
+                key={`graph-${service.id}`} 
+                service={service} 
+              />
             ))}
           </div>
-        </div>
-      )}
+          
+        </TabsContent>
+      </Tabs>
+
+      {/* Remove duplicate ServiceUptimeCard section */}
 
       <IncidentModal
         open={showIncidentModal}
@@ -578,6 +533,45 @@ export default function Dashboard() {
         type="maintenance"
         organizationId={selectedOrganization?.id} 
       />
+
+      {selectedIncidentForEdit && (
+        <IncidentEditModal
+          open={!!selectedIncidentForEdit}
+          onOpenChange={(open) => !open && setSelectedIncidentForEdit(null)}
+          incident={selectedIncidentForEdit}
+          services={services}
+          onSave={async (incidentData) => {
+            try {
+              const token = await getToken();
+              if (!token) {
+                toast.error('Authentication required');
+                return;
+              }
+              
+              const response = await fetch(`${getApiUrl()}/incidents/${selectedIncidentForEdit.id}`, {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(incidentData)
+              });
+
+              if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || 'Failed to update incident');
+              }
+              
+              toast.success('Incident updated successfully');
+              await fetchData(selectedOrganization?.id, token);
+              setSelectedIncidentForEdit(null);
+            } catch (error) {
+              console.error('Error updating incident:', error);
+              toast.error(error instanceof Error ? error.message : 'Failed to update incident');
+            }
+          }}
+        />
+      )}
 
       <Tabs defaultValue="active" className="w-full">
         <TabsList className="grid w-full grid-cols-2 md:w-auto md:inline-flex">
@@ -620,10 +614,11 @@ export default function Dashboard() {
                           </div>
                         </div>
                       )}
-                      <div className="flex items-center gap-4 mt-4">
+                      <div className="flex items-center gap-2 mt-4 flex-wrap">
                         <Button
                           variant="outline"
                           size="sm"
+                          className="flex-1 sm:flex-none"
                           onClick={async () => {
                             try {
                               await updateIncident(incident.id, { status: "resolved" });
@@ -639,10 +634,20 @@ export default function Dashboard() {
                         <Button
                           variant="outline"
                           size="sm"
+                          className="flex-1 sm:flex-none"
                           onClick={() => setSelectedIncidentForUpdate(incident)}
                         >
                           <MessageSquare className="h-4 w-4 mr-2" />
                           Add Update
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 sm:flex-none"
+                          onClick={() => setSelectedIncidentForEdit(incident)}
+                        >
+                          <Pencil className="h-4 w-4 mr-2" />
+                          Edit
                         </Button>
                       </div>
                     </div>

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "sonner";
 
 // Define and export ServiceStatus type
 export type ServiceStatus = "operational" | "degraded" | "partial_outage" | "major_outage" | "maintenance";
@@ -183,22 +184,30 @@ export const useServiceStore = create<ServiceStore>((set) => ({
 
   deleteService: async (id) => {
     try {
-      const response = await fetch(`${API_URL}/api/services/${id}`, {
+      // Get the token from Clerk
+      const token = await window.Clerk.session?.getToken();
+      if (!token) {
+        throw new Error("No authentication token available");
+      }
+
+      const response = await fetch(`${API_URL}/services/${id}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
-        },
-        credentials: "include",
+          "Authorization": `Bearer ${token}`
+        }
       });
 
       if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({ message: "Failed to delete service" }));
-        throw new Error(errorBody.message || "Failed to delete service");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.message || `Failed to delete service: ${response.status}`);
       }
 
       set((state) => ({
         services: state.services.filter((service) => service.id !== id),
       }));
+      
+      toast.success("Service deleted successfully");
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Unknown error",

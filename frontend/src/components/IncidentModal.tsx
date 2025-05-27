@@ -33,6 +33,10 @@ export function IncidentModal({
   const { getToken } = useAuth();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  type IncidentStatus = "investigating" | "identified" | "monitoring" | "resolved" | "scheduled";
+  const [status, setStatus] = useState<IncidentStatus>(
+    type === "maintenance" ? "scheduled" : "investigating"
+  );
   const [selectedServices, setSelectedServices] = useState<string[]>(
     selectedServiceId ? [selectedServiceId] : []
   );
@@ -56,7 +60,7 @@ export function IncidentModal({
         body: JSON.stringify({
           title,
           description,
-          status: type === "maintenance" ? "scheduled" : "investigating",
+          status,
           service_ids: selectedServices,
           organization_id: organizationId,
         }),
@@ -87,6 +91,7 @@ export function IncidentModal({
   const resetForm = () => {
     setTitle("");
     setDescription("");
+    setStatus((type === "maintenance" ? "scheduled" : "investigating") as IncidentStatus);
     setSelectedServices(selectedServiceId ? [selectedServiceId] : []);
   };
 
@@ -112,32 +117,46 @@ export function IncidentModal({
               id="title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="col-span-3"
-              placeholder="Enter title"
+              placeholder="Enter incident title"
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="description" className="text-right">
-              Description
-            </Label>
+          <div className="grid gap-2">
+            <Label>Status</Label>
+            <Select
+              value={status}
+              onValueChange={(value) => setStatus(value as any)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="investigating">Investigating</SelectItem>
+                <SelectItem value="identified">Identified</SelectItem>
+                <SelectItem value="monitoring">Monitoring</SelectItem>
+                <SelectItem value="resolved">Resolved</SelectItem>
+                {type === "maintenance" && (
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="description">Description</Label>
             <Textarea
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="col-span-3"
               placeholder="Enter description"
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="services" className="text-right">
-              Services
-            </Label>
+          <div className="grid gap-2">
+            <Label htmlFor="services">Affected Services</Label>
             <Select
-              value={selectedServices[0]}
+              value={selectedServices[0] || ""}
               onValueChange={(value) => setSelectedServices([value])}
             >
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select affected service" />
+              <SelectTrigger>
+                <SelectValue placeholder="Select services" />
               </SelectTrigger>
               <SelectContent>
                 {services.map((service) => (

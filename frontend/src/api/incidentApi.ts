@@ -50,14 +50,17 @@ export async function deleteIncident(incidentId: string, token: string) {
 }
 
 export async function addIncidentUpdate(data: { message: string; incident_id: string }, token: string) {
-  const res = await fetch(`${API_URL}/updates`, {
+  const res = await fetch(`${API_URL}/incidents/${data.incident_id}/updates`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
     },
-    body: JSON.stringify(data),
+    body: JSON.stringify({ message: data.message }),
   });
-  if (!res.ok) throw new Error('Failed to add update');
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.message || 'Failed to add update');
+  }
   return res.json();
-} 
+}

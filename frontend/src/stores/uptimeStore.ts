@@ -15,7 +15,7 @@ interface UptimeMetric {
   downtimeMinutes: number
 }
 
-interface CurrentUptime {
+export interface CurrentUptime {
   uptime: number | null
   checksCount: number
   lastCheck: string | null
