@@ -1478,7 +1478,9 @@ async def get_service_uptime_metrics(
             
         # Only count if the incident overlaps with our time range
         if incident_end > start_time:
-            incident_start = max(incident.createdAt, start_time)
+            
+            start_time_aware = start_time.replace(tzinfo=incident.createdAt.tzinfo)
+            incident_start = max(incident.createdAt, start_time_aware)
             downtime_seconds += (incident_end - incident_start).total_seconds()
     
     # Calculate uptime percentage (clamped between 0 and 100)
