@@ -1442,13 +1442,13 @@ async def get_service_uptime_metrics(
     else:  # 30d
         start_time = now - timedelta(days=30)
     
-    # Get uptime checks from the database
+    # Get uptime checks from the database - Fixed: using order_by instead of sort
     checks = await db.uptimecheck.find_many(
         where={
             "service_id": service_id,
             "timestamp": {"gte": start_time}
         },
-        sort={"timestamp": "asc"}
+        order_by={"timestamp": "asc"}
     )
     
     # Format the response
@@ -1460,7 +1460,7 @@ async def get_service_uptime_metrics(
         }
         for check in checks
     ]
-
+    
 @app.get("/services")
 async def get_services():
     """Get a list of all services and their current status."""
