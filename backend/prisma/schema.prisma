@@ -60,23 +60,10 @@ model User {
   clerk_user_id     String                @unique
   email             String                @unique
   name              String?
-  organization      Organization          @relation(fields: [organization_id], references: [id])
-  organization_id   String
-  notificationPreferences NotificationPreference?
+  organization      Organization? @relation(fields: [organization_id], references: [id])
+  organization_id   String?
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
-}
-
-model NotificationPreference {
-  id                String    @id @default(uuid())
-  user              User      @relation(fields: [user_id], references: [id])
-  user_id           String    @unique
-  serviceStatusChanges Boolean @default(true)
-  newIncidents      Boolean   @default(true)
-  incidentUpdates   Boolean   @default(true)
-  incidentResolved  Boolean   @default(true)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
 }
 
 model UptimeCheck {

@@ -995,74 +995,6 @@ class SyncedUserResponse(BaseModel):
         populate_by_name = True
 
 
-class NotificationPreferenceUpdate(BaseModel):
-    pass
-
-class NotificationPreferenceResponse(BaseModel):
-    serviceStatusChanges: bool
-    newIncidents: bool
-    incidentUpdates: bool
-    incidentResolved: bool
-
-# The pass for NotificationPreferenceUpdate is a placeholder to ensure the class definition itself is not removed if it's the exact target. The original content of NotificationPreferenceUpdate should be preserved by the tool if it's smart, or I might need to re-paste it if it gets clobbered. Assuming the tool is smart enough to insert *around* or *after* the target if the replacement is just adding new classes.
-# Better target: insert *before* the PUT route.
-# Let's try a more specific target for insertion for the new GET route.
-# Target: the line before '@app.put("/users/me/notification-preferences")'
-# However, the tool requires TargetContent. So, I'll target a known line and insert the new content relative to it.
-# The class NotificationPreferenceUpdate is a good anchor.
-    serviceStatusChanges: Optional[bool] = None
-    newIncidents: Optional[bool] = None
-    incidentUpdates: Optional[bool] = None
-    incidentResolved: Optional[bool] = None
-
-
-@app.get("/users/me/notification-preferences", response_model=NotificationPreferenceResponse)
-async def get_notification_preferences(
-    current_user_payload: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
-):
-    user_from_db = await db.user.find_unique(
-        where={"clerk_user_id": current_user_payload.id},
-        include={"notificationPreferences": True}
-    )
-    
-    if not user_from_db:
-        raise HTTPException(status_code=404, detail="User not found in local database.")
-    
-    if not user_from_db.notificationPreferences:
-        # This implies that notification preferences were not created with the user or were deleted.
-        where={"clerk_user_id": current_user_payload.id},
-        include={"notificationPreferences": True}
-    
-    
-    if not user_from_db:
-        raise HTTPException(status_code=404, detail="User not found in local database.")
-
-    # Convert to dict and exclude unset values
-    updated_data = notification_preferences.dict(exclude_unset=True)
-    
-    if not user_from_db.notificationPreferences:
-        # Create preferences if they don't exist
-        notification_preferences = await db.notificationpreference.create(
-            data={
-                "user": {
-                    "connect": {"id": user_from_db.id}
-                },
-                **updated_data
-            }
-        )
-    else:
-        # Update existing preferences
-        notification_preferences = await db.notificationpreference.update(
-            where={"id": user_from_db.notificationPreferences.id},
-            data=updated_data
-        )
-    
-    return NotificationPreferenceResponse(
-        serviceStatusChanges=notification_preferences.serviceStatusChanges,
-        newIncidents=notification_preferences.newIncidents,
-        incidentUpdates=notification_preferences.incidentUpdates,
-        incidentResolved=notification_preferences.incidentResolved,
-    )
 
 
 @app.post("/users/ensure-synced", response_model=SyncedUserResponse)
@@ -1291,45 +1223,7 @@ async def get_current_user_details(clerk_user_payload: Annotated[ClerkUser, Depe
         raise HTTPException(status_code=404, detail="User not found in local database. Please try syncing.")
     return user
     
-@app.put("/users/me/notification-preferences")
-async def update_notification_preferences(
-    preferences: NotificationPreferenceUpdate,
-    current_user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
-):
-    # Get the first email address from the Clerk user
-    user_email = current_user.email_addresses[0].email_address if current_user.email_addresses else None
-    if not user_email:
-        raise HTTPException(status_code=400, detail="No email found for user")
-        
-    user = await db.user.find_first(
-        where={"email": user_email},
-        include={"notificationPreferences": True}
-    )
-    print(user)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Convert to dict and exclude unset values
-    updated_data = {k: v for k, v in preferences.model_dump().items() if v is not None}
-    print(updated_data)
-    if not user.notificationPreferences:
-        # Create preferences if they don't exist
-        notification_preferences = await db.notificationpreference.create(
-            data={
-                "user": {
-                    "connect": {"id": user.id}
-                },
-                **updated_data
-            }
-        )
-    else:
-        # Update existing preferences
-        notification_preferences = await db.notificationpreference.update(
-            where={"id": user.notificationPreferences.id},
-            data=updated_data
-        )
-    
-    return notification_preferences
+# Notification preferences have been removed - all notifications are now enabled by default
 
 
 @app.post("/services/{service_id}/check")
