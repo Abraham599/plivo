@@ -10,6 +10,7 @@ import { useAuth } from "@clerk/clerk-react"
 import { format } from "date-fns"
 import { formatServiceStatusDisplayName, formatIncidentStatusDisplayName } from "../lib/format"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import NotificationPreferences from "@/components/NotificationPreferences"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,7 +20,6 @@ import { Pencil,  ArrowUpDown, Clock, AlertCircle, MessageSquare, Check, Bell, L
 import { ServiceEditModal } from "../components/ServiceEditModal";
 import { IncidentUpdateModal } from "../components/IncidentUpdateModal";
 import { IncidentEditModal } from "../components/IncidentEditModal";
-import { DashboardSettings } from "../components/DashboardSettings"
 import { OrganizationSelector } from "../components/OrganizationSelector"
 import { IncidentModal } from "../components/IncidentModal"
 import { toast } from "sonner"
@@ -356,7 +356,7 @@ console.log(services);
         </div>
       </div>
 
-      {showSettings && <DashboardSettings />}
+      {showSettings &&  <NotificationPreferences/>}
       
       <ServiceEditModal
         open={isServiceEditModalOpen && selectedServiceForEdit === null}
@@ -508,8 +508,7 @@ console.log(services);
         </TabsContent>
       </Tabs>
 
-      {/* Remove duplicate ServiceUptimeCard section */}
-
+    
       <IncidentModal
         open={showIncidentModal}
         onOpenChange={setShowIncidentModal}

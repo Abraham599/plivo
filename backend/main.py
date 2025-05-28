@@ -1335,7 +1335,7 @@ async def update_notification_preferences(
         )
     else:
         # Update existing preferences
-        notification_preferences = await db.notificationPreference.update(
+        notification_preferences = await db.NotificationPreference.update(
             where={"id": user.notificationPreferences.id},
             data=updated_data
         )
