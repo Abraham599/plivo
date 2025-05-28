@@ -17,10 +17,12 @@ class NotificationService:
     
     async def get_organization_users(self, organization_id: str):
         """Get all users for an organization with their notification preferences."""
+        print(organization_id)
         users = await self.db.user.find_many(
             where={"organization_id": organization_id},
             include={"NotificationPreferences": True}
         )
+        print(users)
         return users
     
     async def send_service_status_change_notification(self, service_id: str, old_status: str, new_status: str):
