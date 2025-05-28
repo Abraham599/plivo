@@ -29,12 +29,12 @@ class NotificationService:
             where={"id": service_id},
             include={"organization": True}
         )
-        
+        print(service)
         if not service:
             return
         
         users = await self.get_organization_users(service.organization_id)
-        
+        print(users)
         # Filter users who want service status change notifications
         recipients = [
             user.email for user in users 
