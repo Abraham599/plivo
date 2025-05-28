@@ -325,7 +325,10 @@ async def create_organization(org: OrganizationCreate, user: Annotated[ClerkUser
     # Create organization in database and associate the user
     try:
         # First, ensure the user exists in our database
-        db_user = await db.user.find_unique(where={"clerk_user_id": user.id})
+        db_user = await db.user.find_unique(
+            where={"clerk_user_id": user.id},
+            include={"organization": True}
+        )
         
         if not db_user:
             # Create the user if they don't exist
@@ -333,12 +336,8 @@ async def create_organization(org: OrganizationCreate, user: Annotated[ClerkUser
                 data={
                     "clerk_user_id": user.id,
                     "email": user_email,
-                    "name": getattr(user, 'first_name', '') + ' ' + getattr(user, 'last_name', ''),
-                    "organization": {
-                        "connect": {
-                            "clerk_org_id": clerk_org_id
-                        }
-                    }
+                    "name": getattr(user, 'first_name', '') + ' ' + getattr(user, 'last_name', '')
+                    # Don't set organization_id here as it represents the current organization
                 }
             )
         
@@ -352,6 +351,13 @@ async def create_organization(org: OrganizationCreate, user: Annotated[ClerkUser
                 }
             }
         )
+        
+        # If this is the user's first organization, set it as their current organization
+        if not db_user.organization_id:
+            await db.user.update(
+                where={"id": db_user.id},
+                data={"organization_id": created_org.id}
+            )
         
         return created_org
         
