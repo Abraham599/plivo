@@ -1058,7 +1058,7 @@ async def get_notification_preferences(
     
     if not user_from_db.notificationPreferences:
         # Create preferences if they don't exist
-        notification_preferences = await db.notificationPreference.create(
+        notification_preferences = await db.notificationpreference.create(
             data={
                 "user": {
                     "connect": {"id": user_from_db.id}
