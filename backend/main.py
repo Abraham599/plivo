@@ -563,28 +563,6 @@ async def switch_organization(
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")
         
-        # Verify the user is a member of this organization in Clerk
-        memberships = await clerk_service.get_user_organizations(user_id=user.id)
-        is_member = False
-        
-        # Check each membership to see if the user is a member of this organization
-        for m in memberships:
-            # Check if membership has organization as attribute or dict key
-            if hasattr(m, 'organization') and hasattr(m.organization, 'id'):
-                if m.organization.id == org.clerk_org_id:
-                    is_member = True
-                    break
-            elif isinstance(m, dict) and 'organization' in m:
-                if hasattr(m['organization'], 'id') and m['organization'].id == org.clerk_org_id:
-                    is_member = True
-                    break
-        
-        if not is_member:
-            raise HTTPException(
-                status_code=403, 
-                detail="You are not a member of this organization"
-            )
-        
         # Update the user's active organization in the database
         updated_user = await db.user.update(
             where={"clerk_user_id": user.id},

@@ -15,15 +15,13 @@ class NotificationService:
     def __init__(self, db: Prisma):
         self.db = db
     
-    async def get_organization_users(self, organization_id: str):
-        """Get all users for an organization with their notification preferences."""
-        print(organization_id)
-        users = await self.db.user.find_many(
-            where={"organization_id": organization_id},
+    async def get_user_with_preferences(self, user_id: str):
+        """Get a user with their notification preferences."""
+        user = await self.db.user.find_unique(
+            where={"id": user_id},
             include={"notificationPreferences": True}
         )
-        print(users)
-        return users
+        return user
     
     async def send_service_status_change_notification(self, service_id: str, old_status: str, new_status: str):
         """Send email notifications for service status changes."""
@@ -35,13 +33,11 @@ class NotificationService:
         if not service:
             return
         
-        users = await self.get_organization_users(service.organization_id)
-        print(users)
-        # Filter users who want service status change notifications
-        recipients = [
-            user.email for user in users 
-            if user.notificationPreferences and user.notificationPreferences.serviceStatusChanges
-        ]
+        # Get the user who owns the service
+        user = await self.get_user_with_preferences(service.organization.user_id)
+        # Check if user wants service status change notifications
+        recipients = [user.email] if (user and user.notificationPreferences 
+                                   and user.notificationPreferences.serviceStatusChanges) else []
         print(recipients)
         
         if not recipients:
@@ -74,13 +70,11 @@ class NotificationService:
         if not incident:
             return
         
-        users = await self.get_organization_users(incident.organization_id)
-        
-        # Filter users who want new incident notifications
-        recipients = [
-            user.email for user in users 
-            if user.notificationPreferences and user.notificationPreferences.newIncidents
-        ]
+        # Get the user who owns the organization
+        user = await self.get_user_with_preferences(incident.organization.user_id)
+        # Check if user wants new incident notifications
+        recipients = [user.email] if (user and user.notificationPreferences 
+                                   and user.notificationPreferences.newIncidents) else []
         
         if not recipients:
             return
@@ -112,13 +106,11 @@ class NotificationService:
         if not update or not update.incident:
             return
         
-        users = await self.get_organization_users(update.incident.organization_id)
-        
-        # Filter users who want incident update notifications
-        recipients = [
-            user.email for user in users 
-            if user.notificationPreferences and user.notificationPreferences.incidentUpdates
-        ]
+        # Get the user who owns the organization
+        user = await self.get_user_with_preferences(update.incident.organization.user_id)
+        # Check if user wants incident update notifications
+        recipients = [user.email] if (user and user.notificationPreferences 
+                                   and user.notificationPreferences.incidentUpdates) else []
         
         if not recipients:
             return
@@ -149,13 +141,11 @@ class NotificationService:
         if not incident:
             return
         
-        users = await self.get_organization_users(incident.organization_id)
-        
-        # Filter users who want incident resolved notifications
-        recipients = [
-            user.email for user in users 
-            if user.notificationPreferences and user.notificationPreferences.incidentResolved
-        ]
+        # Get the user who owns the organization
+        user = await self.get_user_with_preferences(incident.organization.user_id)
+        # Check if user wants incident resolved notifications
+        recipients = [user.email] if (user and user.notificationPreferences 
+                                   and user.notificationPreferences.incidentResolved) else []
         
         if not recipients:
             return

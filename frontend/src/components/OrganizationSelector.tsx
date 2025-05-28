@@ -65,7 +65,7 @@ export function OrganizationSelector({
       <Select
         value={selectedOrganization?.id}
         onValueChange={(value) => {
-          const org = organizations.find((o) => o.id === value);
+          const org = organizations.find(org => org.id === value);
           if (org) onOrganizationChange(org);
         }}
       >
