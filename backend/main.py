@@ -1294,19 +1294,19 @@ async def get_current_user_details(clerk_user_payload: Annotated[ClerkUser, Depe
 @app.put("/users/me/notification-preferences")
 async def update_notification_preferences(
     preferences: NotificationPreferenceUpdate,
-    current_user: Annotated[Any, Depends(get_clerk_user)]
+    current_user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
 ):
     user = await db.user.find_first(
-        where={"email": current_user.email_addresses[0].email_address},
+        where={"email": current_user.email},
         include={"notificationPreferences": True}
     )
-    
+    print(user)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
     # Convert to dict and exclude unset values
     updated_data = {k: v for k, v in preferences.model_dump().items() if v is not None}
-    
+    print(updated_data)
     if not user.notificationPreferences:
         # Create preferences if they don't exist
         notification_preferences = await db.notificationpreference.create(
