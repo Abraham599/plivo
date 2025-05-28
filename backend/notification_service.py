@@ -19,7 +19,7 @@ class NotificationService:
         """Get all users for an organization with their notification preferences."""
         users = await self.db.user.find_many(
             where={"organization_id": organization_id},
-            include={"notificationPreferences": True}
+            include={"NotificationPreferences": True}
         )
         return users
     
