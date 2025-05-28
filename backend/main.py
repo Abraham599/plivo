@@ -1296,8 +1296,13 @@ async def update_notification_preferences(
     preferences: NotificationPreferenceUpdate,
     current_user: Annotated[ClerkUser, Depends(get_clerk_user_payload)]
 ):
+    # Get the first email address from the Clerk user
+    user_email = current_user.email_addresses[0].email_address if current_user.email_addresses else None
+    if not user_email:
+        raise HTTPException(status_code=400, detail="No email found for user")
+        
     user = await db.user.find_first(
-        where={"email": current_user.email},
+        where={"email": user_email},
         include={"notificationPreferences": True}
     )
     print(user)
