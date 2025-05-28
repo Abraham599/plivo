@@ -1068,7 +1068,7 @@ async def get_notification_preferences(
         )
     else:
         # Update existing preferences
-        notification_preferences = await db.notificationPreference.update(
+        notification_preferences = await db.notificationpreference.update(
             where={"id": user_from_db.notificationPreferences.id},
             data=updated_data
         )
@@ -1325,7 +1325,7 @@ async def update_notification_preferences(
     
     if not user.notificationPreferences:
         # Create preferences if they don't exist
-        notification_preferences = await db.notificationPreference.create(
+        notification_preferences = await db.notificationpreference.create(
             data={
                 "user": {
                     "connect": {"id": user.id}
@@ -1335,7 +1335,7 @@ async def update_notification_preferences(
         )
     else:
         # Update existing preferences
-        notification_preferences = await db.NotificationPreference.update(
+        notification_preferences = await db.notificationpreference.update(
             where={"id": user.notificationPreferences.id},
             data=updated_data
         )
