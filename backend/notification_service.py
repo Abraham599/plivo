@@ -27,17 +27,17 @@ class NotificationService:
         """Send email notifications for service status changes."""
         service = await self.db.service.find_unique(
             where={"id": service_id},
-            include={"organization": True}
+            include={"organization": {"include": {"users": {"include": {"notificationPreferences": True}}}}}
         )
         print(service)
-        if not service:
+        if not service or not service.organization:
             return
         
-        # Get the user who owns the service
-        user = await self.get_user_with_preferences(service.organization.user_id)
-        # Check if user wants service status change notifications
-        recipients = [user.email] if (user and user.notificationPreferences 
-                                   and user.notificationPreferences.serviceStatusChanges) else []
+        # Get all users in the organization who want service status change notifications
+        recipients = [
+            user.email for user in service.organization.users 
+            if user.notificationPreferences and user.notificationPreferences.serviceStatusChanges
+        ]
         print(recipients)
         
         if not recipients:
@@ -64,17 +64,26 @@ class NotificationService:
         """Send email notifications for new incidents."""
         incident = await self.db.incident.find_unique(
             where={"id": incident_id},
-            include={"services": True, "organization": True}
+            include={
+                "services": True, 
+                "organization": {
+                    "include": {
+                        "users": {
+                            "include": {"notificationPreferences": True}
+                        }
+                    }
+                }
+            }
         )
         
-        if not incident:
+        if not incident or not incident.organization:
             return
         
-        # Get the user who owns the organization
-        user = await self.get_user_with_preferences(incident.organization.user_id)
-        # Check if user wants new incident notifications
-        recipients = [user.email] if (user and user.notificationPreferences 
-                                   and user.notificationPreferences.newIncidents) else []
+        # Get all users in the organization who want new incident notifications
+        recipients = [
+            user.email for user in incident.organization.users 
+            if user.notificationPreferences and user.notificationPreferences.newIncidents
+        ]
         
         if not recipients:
             return
