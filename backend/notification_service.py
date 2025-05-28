@@ -20,7 +20,7 @@ class NotificationService:
         print(organization_id)
         users = await self.db.user.find_many(
             where={"organization_id": organization_id},
-            include={"notificationpreferences": True}
+            include={"notificationPreferences": True}
         )
         print(users)
         return users
@@ -40,7 +40,7 @@ class NotificationService:
         # Filter users who want service status change notifications
         recipients = [
             user.email for user in users 
-            if user.notificationpreferences and user.notificationpreferences.serviceStatusChanges
+            if user.notificationPreferences and user.notificationPreferences.serviceStatusChanges
         ]
         print(recipients)
         
