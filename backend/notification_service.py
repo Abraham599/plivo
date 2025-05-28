@@ -40,6 +40,7 @@ class NotificationService:
             user.email for user in users 
             if user.notificationPreferences and user.notificationPreferences.serviceStatusChanges
         ]
+        print(recipients)
         
         if not recipients:
             return
