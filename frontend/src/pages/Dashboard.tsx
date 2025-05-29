@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
 import type { Service, ServiceStatus } from "../stores/serviceStore"
 import type { Incident } from "../stores/incidentStore"
 import { getAuthHeaders, getApiUrl } from "../lib/api"
@@ -25,25 +26,47 @@ import { IncidentModal } from "../components/IncidentModal"
 import { toast } from "sonner"
 
 export default function Dashboard() {
-  const { isLoaded: authIsLoaded, getToken } = useAuth();
+  const { isLoaded: authIsLoaded, getToken, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = useCallback(async () => {
+    try {
+      setIsLoggingOut(true);
+      await signOut();
+      // Force a full page reload to clear any auth state
+      window.location.href = '/sign-in';
+    } catch (error) {
+      console.error('Error during sign out:', error);
+      window.location.href = '/sign-in';
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }, [signOut]);
   const [services, setServices] = useState<Service[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     const loadAllData = async () => {
       if (!authIsLoaded) {
         return;
       }
-      const token = await getToken();
-      if (!token) {
-        setIsPageLoading(false);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setIsPageLoading(false);
+          return;
+        }
+        await fetchData(selectedOrganization?.id, token);
+      } catch (error) {
+        console.error('Error getting token:', error);
+        navigate('/sign-in');
         return;
       }
-      await fetchData(selectedOrganization?.id, token);
     };
 
     loadAllData();
@@ -303,8 +326,23 @@ console.log(services);
   return (
     <div className="container mx-auto py-6 space-y-4">
       <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <h1 className="text-3xl font-bold">Dashboard</h1>
+        <div className="flex items-center justify-between gap-4 mb-6">
+        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <Button 
+          variant="outline" 
+          onClick={handleLogout} 
+          disabled={isLoggingOut}
+          className="ml-auto"
+        >
+          {isLoggingOut ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Logging out...
+            </>
+          ) : (
+            'Logout'
+          )}
+        </Button>
           {isPageLoading && !selectedOrganization ? ( 
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
